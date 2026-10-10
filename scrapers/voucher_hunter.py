@@ -9,6 +9,75 @@ def get_comprehensive_voucher_catalog():
     Người dùng chỉ cần chạm vào mã để sao chép và dán vào ô Shopee Voucher.
     """
     return [
+        # --- 0. MÃ ẨN ĐẶC BIỆT: SIÊU HỘI SHOPEE (ĐƠN TỪ 0Đ GIẢM SÂU TRỰC TIẾP) ---
+        {
+            "voucher_id": "SP_AN_SIEUHOI_110K",
+            "voucher_code": "SIEUHOISHOPEEOCTR",
+            "voucher_type": "PLATFORM",
+            "category": "Siêu Hội Shopee",
+            "title": "Mã Ẩn Siêu Hội: Giảm 110.000đ đơn từ 0đ",
+            "description": "Mã ẩn nhập tay Siêu Hội Shopee, giảm trực tiếp giá sản phẩm",
+            "discount_type": "FIXED_AMOUNT",
+            "discount_value": 110000,
+            "max_discount_amount": 110000,
+            "min_spend": 0,
+            "claim_url": "https://shopee.vn/m/ma-giam-gia",
+            "guide": "Vào giỏ hàng, dán mã SIEUHOISHOPEEOCTR vào ô 'Shopee Voucher' để giảm ngay 110k.",
+            "is_hidden": 1,
+            "is_freeship": 0,
+            "status": "ACTIVE"
+        },
+        {
+            "voucher_id": "SP_AN_SIEUHOI_100K",
+            "voucher_code": "SIEUHOI100K",
+            "voucher_type": "PLATFORM",
+            "category": "Siêu Hội Shopee",
+            "title": "Mã Ẩn Siêu Hội: Giảm 100.000đ đơn từ 0đ",
+            "description": "Mã nhập tay chiến dịch Siêu Hội Shopee",
+            "discount_type": "FIXED_AMOUNT",
+            "discount_value": 100000,
+            "max_discount_amount": 100000,
+            "min_spend": 0,
+            "claim_url": "https://shopee.vn/m/ma-giam-gia",
+            "guide": "Nhập mã SIEUHOI100K tại ô Shopee Voucher khi thanh toán đơn từ 0đ.",
+            "is_hidden": 1,
+            "is_freeship": 0,
+            "status": "ACTIVE"
+        },
+        {
+            "voucher_id": "SP_AN_SIEUHOI_150K",
+            "voucher_code": "SIEUHOI150K",
+            "voucher_type": "PLATFORM",
+            "category": "Siêu Hội Shopee",
+            "title": "Mã Ẩn Siêu Hội: Giảm 150.000đ đơn từ 350k",
+            "description": "Mã ẩn nhập tay áp dụng toàn sàn",
+            "discount_type": "FIXED_AMOUNT",
+            "discount_value": 150000,
+            "max_discount_amount": 150000,
+            "min_spend": 350000,
+            "claim_url": "https://shopee.vn/m/ma-giam-gia",
+            "guide": "Nhập mã SIEUHOI150K khi thanh toán đơn từ 350k.",
+            "is_hidden": 1,
+            "is_freeship": 0,
+            "status": "ACTIVE"
+        },
+        {
+            "voucher_id": "SP_AN_OCT_70K",
+            "voucher_code": "OCTSALE70K",
+            "voucher_type": "PLATFORM",
+            "category": "Siêu Sale Tháng 10",
+            "title": "Mã Ẩn Sale Tháng 10: Giảm 70.000đ đơn từ 0đ",
+            "description": "Mã ẩn nhập tay toàn sàn đơn từ 0đ",
+            "discount_type": "FIXED_AMOUNT",
+            "discount_value": 70000,
+            "max_discount_amount": 70000,
+            "min_spend": 0,
+            "claim_url": "https://shopee.vn/m/ma-giam-gia",
+            "guide": "Nhập OCTSALE70K tại bước thanh toán để giảm ngay 70k.",
+            "is_hidden": 1,
+            "is_freeship": 0,
+            "status": "ACTIVE"
+        },
         # --- 1. MÃ ẨN ĐỘC QUYỀN TOÀN SÀN & ĐIỆN TỬ (MÃ NHẬP TAY) ---
         {
             "voucher_id": "SP_AN_TECH_500K",

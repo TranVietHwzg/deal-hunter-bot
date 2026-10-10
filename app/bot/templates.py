@@ -40,7 +40,13 @@ def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[
     platform = str(voucher.get("platform_id") or "SHOPEE").upper()
     title = voucher.get("title", "")
     code = voucher.get("voucher_code") or "LƯU TRÊN BANNER"
-    is_hidden = voucher.get("is_hidden") == 1 or "ẨN" in title.upper() or "AN" in str(voucher.get("category", "")).upper()
+    is_hidden = (
+        voucher.get("is_hidden") == 1 
+        or "ẨN" in title.upper() 
+        or "AN" in str(voucher.get("category", "")).upper() 
+        or "SIEUHOI" in code.upper()
+        or "SIÊU HỘI" in str(voucher.get("category", "")).upper()
+    )
 
     # Tính mức giảm
     d_type = str(voucher.get("discount_type", "FIXED_AMOUNT")).upper()
@@ -57,10 +63,17 @@ def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[
     claim_url = voucher.get("claim_url") or "https://shopee.vn"
     category = voucher.get("category") or "Toàn sàn"
 
-    tag = "🔑 <b>[MÃ ẨN NHẬP TAY]</b>" if is_hidden else "🔥 <b>[VOUCHER HOT]</b>"
+    if is_hidden:
+        if "SIEUHOI" in code.upper() or "SIÊU HỘI" in str(voucher.get("category", "")).upper():
+            tag = "🔑🔥 <b>[MÃ ẨN ĐẶC BIỆT — SIÊU HỘI SHOPEE]</b>"
+        else:
+            tag = "🔑 <b>[MÃ ẨN NHẬP TAY ĐỘC QUYỀN]</b>"
+    else:
+        tag = "🔥 <b>[VOUCHER HOT]</b>"
 
     shop_scope = get_voucher_shop_scope(voucher)
     shop_line = f"🏪 <b>Áp dụng:</b> Chỉ Shop {shop_scope}\n" if shop_scope else ""
+    extra_guide = f"💡 <i>Vào giỏ hàng, dán mã <code>{code}</code> vào ô \"Shopee Voucher\" để nhận ngay!</i>\n" if is_hidden else ""
 
     # Định dạng siêu gọn: 5 dòng cốt lõi (chỉ thêm dòng shop nếu áp dụng cho shop cụ thể)
     msg = (
@@ -69,6 +82,7 @@ def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[
         f"💰 <b>Mức giảm:</b> <b>{discount_str}</b>\n"
         f"🛒 <b>Điều kiện:</b> {min_spend_str} | {category}\n"
         f"{shop_line}"
+        f"{extra_guide}"
         f"🔗 <a href=\"{claim_url}\">Mở Shopee áp mã ngay</a>"
     )
     return msg

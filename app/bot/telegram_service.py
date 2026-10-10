@@ -440,6 +440,8 @@ class TelegramBotService:
 
         if cmd in ["/start", "/help", "/menu"]:
             await self._cmd_help()
+        elif cmd in ["/hidden", "/maan", "/ma_an", "/an"]:
+            await self._cmd_hidden_vouchers()
         elif cmd in ["/vouchers", "/voucher"]:
             await self._cmd_vouchers(min_score=70)
         elif cmd in ["/hot", "/sieu_voucher"]:
@@ -490,8 +492,8 @@ class TelegramBotService:
             "<i>(Săn voucher xịn Shopee, Lazada, TikTok — Bài trừ 100% Freeship ảo)</i>\n\n"
             "✨ <b>BẠN CÓ THỂ LÀM GÌ:</b>\n"
             "• <b>Dán thẳng link Shopee vào đây</b> để bắt đầu canh giá tự động.\n"
-            "• Hệ thống <b>tự động bắn tin</b> khi có Voucher HOT hoặc sản phẩm đạt giá.\n"
-            "• Gộp mã đa tầng: Shop + Toàn sàn + Video/Live.\n"
+            "• Hệ thống <b>tự động bắn tin</b> khi có Mã Ẩn / Voucher HOT hoặc sản phẩm đạt giá.\n"
+            "• Xem kho mã ẩn nhập tay: <code>/hidden</code>\n"
             "• Thêm mã giảm thủ công: <code>/addvoucher &lt;mã&gt; &lt;giảm&gt; [đơn_tt] [tên_shop]</code>\n\n"
             "👇 <b>Bấm các nút dưới đây để thao tác nhanh:</b>"
         )
@@ -502,15 +504,15 @@ class TelegramBotService:
         return {
             "inline_keyboard": [
                 [
-                    {"text": "🔥 Siêu Voucher HOT", "callback_data": "menu_hot"},
-                    {"text": "🎫 Kho Voucher Xịn", "callback_data": "menu_vouchers"}
+                    {"text": "🔑 Kho Mã Ẩn", "callback_data": "menu_hidden"},
+                    {"text": "🔥 Siêu Voucher HOT", "callback_data": "menu_hot"}
                 ],
                 [
                     {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
                     {"text": "➕ Thêm Sản Phẩm", "callback_data": "menu_add_guide"}
                 ],
                 [
-                    {"text": "⚡️ Quét Deal Ngay", "callback_data": "menu_check"},
+                    {"text": "⚡️ Quét Deal & Mã Ẩn", "callback_data": "menu_check"},
                     {"text": "⚙️ Cài Đặt", "callback_data": "menu_settings"}
                 ]
             ]
@@ -587,26 +589,70 @@ class TelegramBotService:
         await self.send_message("⚡️ Đang quét toàn bộ kho voucher và đối soát giá các sản phẩm...")
         ready_count = await run_scan_cycle(self)
         stats = database.get_stats()
+        hidden_cnt = len(database.get_vouchers(hidden_only=True))
         msg = (
             f"✅ <b>ĐÃ HOÀN TẤT CHU KỲ QUÉT!</b>\n\n"
             f"• Số sản phẩm theo dõi: <b>{stats['total_products']} món</b>\n"
             f"• Số deal đạt mục tiêu mua: <b>{stats['ready_deals']} món</b>\n"
-            f"• Kho voucher xịn đang mở: <b>{stats['total_vouchers']} mã</b>\n"
-            f"• Siêu voucher HOT (Score ≥ 85): <b>{stats['hot_vouchers']} mã</b>\n\n"
-            f"🤖 <i>Bot sẽ tự động gửi cảnh báo khẩn khi có voucher mới hoặc món hàng đạt giá.</i>"
+            f"• Mã ẩn nhập tay (Siêu Hội Shopee): <b>{hidden_cnt} mã</b>\n"
+            f"• Kho voucher xịn đang mở: <b>{stats['total_vouchers']} mã</b>\n\n"
+            f"🤖 <i>Bot sẽ tự động gửi cảnh báo khẩn khi có mã ẩn mới hoặc sản phẩm đạt giá.</i>"
         )
         buttons = {
             "inline_keyboard": [
                 [
-                    {"text": "🔥 Xem Voucher HOT", "callback_data": "menu_hot"},
-                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"}
+                    {"text": "🔑 Kho Mã Ẩn Nhập Tay", "callback_data": "menu_hidden"},
+                    {"text": "🔥 Xem Voucher HOT", "callback_data": "menu_hot"}
                 ],
                 [
+                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
                     {"text": "🏠 Menu Chính", "callback_data": "menu_home"}
                 ]
             ]
         }
         await self.send_message(msg, reply_markup=buttons)
+
+    async def _cmd_hidden_vouchers(self):
+        """Liệt kê danh sách các mã ẩn độc quyền / Siêu Hội Shopee (chạm để copy)"""
+        vouchers = database.get_vouchers(hidden_only=True)
+        if not vouchers:
+            await self.send_message("Hiện tại chưa có mã ẩn nào mới. Hãy bấm Quét Cập Nhật Mã.")
+            return
+
+        header = "🔑🔥 <b>KHO MÃ ẨN NHẬP TAY — SIÊU HỘI SHOPEE:</b>\n"
+        header += "<i>(Chạm vào mã chữ in đậm để sao chép & dán vào ô Shopee Voucher)</i>\n\n"
+        body = ""
+        kb_rows = []
+
+        for i, v in enumerate(vouchers[:10], 1):
+            d_val = int(v['discount_value'])
+            d_str = f"Giảm {int(v['discount_value'])}% (Tối đa {int(v['max_discount_amount']):,}đ)" if v['discount_type'] in ['PERCENT', 'PERCENTAGE'] else f"Giảm {d_val:,}đ"
+            min_sp = f"đơn từ {int(v['min_spend']):,}đ" if v['min_spend'] > 0 else "đơn 0đ"
+            code = v.get("voucher_code") or "LƯU BANNER"
+            
+            shop_scope = get_voucher_shop_scope(v)
+            shop_str = f"   🏪 <i>Chỉ áp dụng: Shop {shop_scope}</i>\n" if shop_scope else ""
+            cat_name = v.get("category") or "Siêu Hội Shopee"
+            
+            body += (
+                f"{i}. 🔑 <code>{code}</code>\n"
+                f"   💰 <b>{d_str}</b> (<b>{min_sp}</b>)\n"
+                f"   📦 {cat_name}\n"
+                f"{shop_str}\n"
+            )
+
+        body += "💡 <i>Mẹo: Vào giỏ hàng Shopee, dán mã vào ô 'Shopee Voucher' để nhận ưu đãi!</i>"
+
+        kb_rows.append([
+            {"text": "🛒 Mở Shopee Áp Mã Ngay", "url": "https://shopee.vn/m/ma-giam-gia"},
+            {"text": "🔥 Siêu Voucher HOT", "callback_data": "menu_hot"}
+        ])
+        kb_rows.append([
+            {"text": "⚡️ Quét Cập Nhật Mã", "callback_data": "menu_check"},
+            {"text": "🏠 Menu Chính", "callback_data": "menu_home"}
+        ])
+
+        await self.send_message(header + body, reply_markup={"inline_keyboard": kb_rows})
 
     async def _cmd_vouchers(self, min_score: int = 0, hot_only: bool = False):
         vouchers = database.get_vouchers(hot_only=hot_only)
@@ -988,6 +1034,8 @@ class TelegramBotService:
                                 # Điều hướng sự kiện nút bấm
                                 if cb_data == "menu_home":
                                     asyncio.create_task(self._cmd_help())
+                                elif cb_data == "menu_hidden":
+                                    asyncio.create_task(self._cmd_hidden_vouchers())
                                 elif cb_data == "menu_hot":
                                     asyncio.create_task(self._cmd_vouchers(min_score=85, hot_only=True))
                                 elif cb_data == "menu_vouchers":

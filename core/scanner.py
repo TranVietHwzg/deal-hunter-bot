@@ -32,11 +32,16 @@ async def run_scan_cycle(bot_instance=None):
     await seed_default_vouchers()
     vouchers = database.get_vouchers()
     
-    # 1. TỰ ĐỘNG BẮN CẢNH BÁO VOUCHER XỊN / MÃ ẨN (KHÔNG CẦN ẤN THỦ CÔNG)
+    # 1. TỰ ĐỘNG BẮN CẢNH BÁO MÃ ẨN & VOUCHER XỊN (KHÔNG CẦN CHỜ SP ĐẠT GIÁ)
     if bot_instance:
+        # Ưu tiên số 1: Quét và gửi ngay các MÃ ẨN NHẬP TAY (như SIEUHOISHOPEEOCTR, Siêu Hội Shopee...)
+        hidden_vouchers = database.get_vouchers(hidden_only=True)
+        for hv in hidden_vouchers:
+            await bot_instance.broadcast_hot_alert(hv)
+
+        # Ưu tiên số 2: Các voucher HOT khác
         hot_vouchers = database.get_vouchers(hot_only=True)
         for hv in hot_vouchers:
-            # broadcast_hot_alert có SHA-256 deduplication, chỉ bắn 1 lần cho voucher mới
             await bot_instance.broadcast_hot_alert(hv)
 
         # Kiểm tra mã hồi sinh (Restock)

@@ -366,7 +366,14 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
     claim_url = voucher_data.get("claim_url", "https://shopee.vn")
     guide = voucher_data.get("guide", "")
     status = str(voucher_data.get("status", "ACTIVE")).upper()
-    is_hidden = 1 if (voucher_data.get("is_hidden") == 1 or "ẨN" in title.upper() or "AN" in category.upper()) else 0
+    is_hidden = 1 if (
+        voucher_data.get("is_hidden") == 1 
+        or "ẨN" in title.upper() 
+        or "AN" in category.upper()
+        or "SIEUHOI" in v_code.upper()
+        or "SIÊU HỘI" in category.upper()
+        or "SIÊU HỘI" in title.upper()
+    ) else 0
     is_hot = 1 if (d_val >= 100000 or (d_type in ["PERCENTAGE", "PERCENT"] and d_val >= 15)) else 0
 
     conn = get_connection()
@@ -409,9 +416,10 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
 def get_vouchers(
     min_score: int = 0,
     hot_only: bool = False,
+    hidden_only: bool = False,
     platform: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Lấy danh sách mã giảm giá, ưu tiên mã ẩn và mã nhập tay"""
+    """Lấy danh sách mã giảm giá, ưu tiên tối đa mã ẩn và mã nhập tay (đơn 0đ lên đầu)"""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -421,13 +429,18 @@ def get_vouchers(
     """
     params = []
 
-    if hot_only:
+    if hidden_only:
+        query += " AND is_hidden = 1"
+    elif hot_only:
         query += " AND (is_hot = 1 OR is_hidden = 1 OR discount_value >= 50000)"
     if platform and platform.upper() != "ALL":
         query += " AND platform_id = ?"
         params.append(platform.upper())
 
-    query += " ORDER BY is_hidden DESC, is_hot DESC, discount_value DESC LIMIT 50"
+    # Ưu tiên số 1: Mã ẩn (is_hidden DESC)
+    # Ưu tiên số 2: Đơn tối thiểu 0đ (min_spend = 0 DESC)
+    # Ưu tiên số 3: Mức tiền giảm thực tế cao nhất (discount_value DESC)
+    query += " ORDER BY is_hidden DESC, (min_spend = 0) DESC, discount_value DESC LIMIT 50"
 
     cursor.execute(query, params)
     rows = cursor.fetchall()
