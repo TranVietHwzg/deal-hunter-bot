@@ -15,6 +15,21 @@ def test_parse_various_shopee_urls():
     assert p2["shop_id"] == "99999"
     assert p2["item_id"] == "87654321"
 
+    # 3. Dạng username / shop_id / item_id
+    u3 = "https://shopee.vn/opaanlp/1171813709/24515279749?__mobile__=1"
+    p3 = ShopeeConnector.parse_shopee_url(u3)
+    assert p3["shop_id"] == "1171813709"
+    assert p3["item_id"] == "24515279749"
+
+@pytest.mark.anyio
+async def test_resolve_short_link_s_shopee_vn():
+    # Kiểm tra giải mã link rút gọn s.shopee.vn/4VdSGmu8Pf
+    res = await ShopeeConnector.resolve_url_and_parse("https://s.shopee.vn/4VdSGmu8Pf")
+    assert res["item_id"] == "24515279749"
+    assert res["shop_id"] == "1171813709"
+    assert res["name"] is not None
+    assert "Yonex" in res["name"]
+
 def test_main_menu_keyboard_layout():
     bot = TelegramBotService()
     kb = bot.get_main_menu_keyboard()

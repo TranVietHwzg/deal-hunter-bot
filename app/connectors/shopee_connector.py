@@ -1,5 +1,7 @@
 import re
+import urllib.parse
 from typing import List, Dict, Any, Optional
+import httpx
 from app.connectors.base import BasePlatformConnector
 from app.core.junk_filter import validate_voucher, is_freeship
 from app.core.scoring_engine import calculate_voucher_quality_score
@@ -146,7 +148,13 @@ class ShopeeConnector(BasePlatformConnector):
 
         return verified_vouchers
 
-    async def fetch_product_details(self, item_id: str, shop_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def fetch_product_details(
+        self,
+        item_id: str,
+        shop_id: Optional[str] = None,
+        name_hint: Optional[str] = None,
+        image_hint: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """Lấy thông tin giá niêm yết và chiết khấu trực tiếp của sản phẩm"""
         if not shop_id:
             shop_id = "0"
@@ -163,64 +171,133 @@ class ShopeeConnector(BasePlatformConnector):
                         "platform": "SHOPEE",
                         "item_id": str(item_id),
                         "shop_id": str(shop_id),
-                        "name": data.get("name", "Sản phẩm Shopee"),
+                        "name": data.get("name") or name_hint or f"Sản phẩm Shopee ({item_id})",
                         "current_price": raw_price if raw_price > 0 else 500000.0,
                         "original_price": raw_before_discount if raw_before_discount > 0 else raw_price,
                         "shop_direct_discount": max(0.0, raw_before_discount - raw_price) if raw_before_discount > raw_price else 0.0,
-                        "image_url": f"https://down-vn.img.susercontent.com/file/{data.get('image', '')}" if data.get('image') else None,
+                        "image_url": f"https://down-vn.img.susercontent.com/file/{data.get('image', '')}" if data.get('image') else image_hint,
                         "product_url": f"https://shopee.vn/product/{shop_id}/{item_id}"
                     }
             except Exception:
                 pass
 
-        # Fallback dữ liệu chuẩn nếu API công khai bị CDN rate-limit
+        # Fallback dữ liệu chuẩn nếu API công khai bị CDN rate-limit / WAF
         return {
             "platform": "SHOPEE",
             "item_id": str(item_id),
             "shop_id": str(shop_id or "88888"),
-            "name": f"Sản phẩm Shopee (Mã {item_id})",
+            "name": name_hint or f"Sản phẩm Shopee ({item_id})",
             "current_price": 650000.0,
             "original_price": 750000.0,
             "shop_direct_discount": 100000.0,
-            "image_url": "https://deo.shopeemobile.com/shopee/shopee-pcmall-live-sg/assets/icon_favicon_1_32.png",
+            "image_url": image_hint or "https://deo.shopeemobile.com/shopee/shopee-pcmall-live-sg/assets/icon_favicon_1_32.png",
             "product_url": f"https://shopee.vn/product/{shop_id or '88888'}/{item_id}"
         }
 
     @staticmethod
     async def resolve_url_and_parse(url: str) -> Dict[str, Optional[str]]:
-        """Giải mã link rút gọn (nếu có) rồi trích xuất shop_id và item_id"""
-        clean_url = url.strip()
-        # Nếu là link rút gọn từ điện thoại (s.shopee.vn hoặc vn.shp.ee)
-        if "shp.ee" in clean_url or "shopee.vn/universal-link" in clean_url:
+        """
+        Giải mã mọi dạng link Shopee:
+        - Link rút gọn chia sẻ từ app di động: s.shopee.vn, shp.ee, vn.shp.ee
+        - Link affiliate, link universal, link SEO có slug
+        - Tự động lấy cả tiêu đề sản phẩm và ảnh thật qua OpenGraph
+        """
+        clean_url = url.strip().rstrip(".,;!?'\")>")
+        parsed = ShopeeConnector.parse_shopee_url(clean_url)
+        
+        is_short = any(k in clean_url for k in [
+            "s.shopee.vn", "shp.ee", "vn.shp.ee", "shopee.vn/universal-link", "short", "share"
+        ])
+        
+        product_name = None
+        image_url = None
+        final_url = clean_url
+
+        # 1. Nếu là link rút gọn hoặc chưa bắt được item_id, gửi HTTP unshorten
+        if is_short or not parsed.get("item_id"):
+            browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             try:
-                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=12.0) as client:
                     resp = await client.get(clean_url, headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                        "User-Agent": browser_ua,
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
                     })
-                    clean_url = str(resp.url)
+                    final_url = str(resp.url)
+                    p_res = ShopeeConnector.parse_shopee_url(final_url)
+                    if p_res.get("item_id"):
+                        parsed = p_res
+                    else:
+                        for h in resp.history:
+                            loc = h.headers.get("location")
+                            if loc:
+                                p_loc = ShopeeConnector.parse_shopee_url(loc)
+                                if p_loc.get("item_id"):
+                                    parsed = p_loc
+                                    break
             except Exception:
                 pass
 
-        return ShopeeConnector.parse_shopee_url(clean_url)
+        # 2. Truy vấn metadata OpenGraph (lấy tên thật và ảnh thật của sản phẩm)
+        try:
+            bot_ua = "TelegramBot (like TwitterBot)"
+            async with httpx.AsyncClient(follow_redirects=True, timeout=8.0) as client:
+                resp_meta = await client.get(clean_url, headers={"User-Agent": bot_ua})
+                if resp_meta.status_code == 200:
+                    m_title = re.search(r'<meta[^>]*property=["\']og:title["\'][^>]*content=["\'](.*?)["\']', resp_meta.text) or \
+                              re.search(r'<title>(.*?)</title>', resp_meta.text)
+                    if m_title:
+                        t = m_title.group(1).strip()
+                        t = re.sub(r'\s*\|\s*Shopee\s*(Việt Nam|Vietnam)?', '', t, flags=re.IGNORECASE).strip()
+                        if t and "shopee" not in t.lower() and len(t) > 3:
+                            product_name = t
+                    
+                    m_img = re.search(r'<meta[^>]*property=["\']og:image["\'][^>]*content=["\'](.*?)["\']', resp_meta.text)
+                    if m_img:
+                        image_url = m_img.group(1).strip()
+        except Exception:
+            pass
+
+        return {
+            "shop_id": parsed.get("shop_id"),
+            "item_id": parsed.get("item_id"),
+            "name": product_name,
+            "image_url": image_url,
+            "resolved_url": final_url
+        }
 
     @staticmethod
     def parse_shopee_url(url: str) -> Dict[str, Optional[str]]:
-        """Phân tích trích xuất item_id và shop_id từ URL Shopee"""
-        clean_url = url.split("?")[0]
-        match1 = re.search(r"i\.(\d+)\.(\d+)", clean_url)
-        if match1:
-            return {"shop_id": match1.group(1), "item_id": match1.group(2)}
+        """Phân tích trích xuất item_id và shop_id từ các định dạng URL Shopee"""
+        clean_url = url.strip()
+        base_path = clean_url.split("?")[0].rstrip("/")
 
-        match2 = re.search(r"product/(\d+)/(\d+)", clean_url)
-        if match2:
-            return {"shop_id": match2.group(1), "item_id": match2.group(2)}
+        # Dạng 1: -i.shop_id.item_id hoặc i.shop_id.item_id
+        match_i = re.search(r'[iI]\.(\d+)\.(\d+)', base_path)
+        if match_i:
+            return {"shop_id": match_i.group(1), "item_id": match_i.group(2)}
 
-        match3 = re.findall(r"-i\.(\d+)\.(\d+)", clean_url)
-        if match3:
-            return {"shop_id": match3[0][0], "item_id": match3[0][1]}
+        # Dạng 2: /product/shop_id/item_id
+        match_prod = re.search(r'/product/(\d+)/(\d+)', base_path)
+        if match_prod:
+            return {"shop_id": match_prod.group(1), "item_id": match_prod.group(2)}
 
-        # Fallback tìm 2 cụm số lớn cuối cùng
-        digits = re.findall(r'\b\d{6,15}\b', clean_url)
+        # Dạng 3: Đường dẫn chứa /username/shop_id/item_id (như /opaanlp/1171813709/24515279749)
+        match_slash = re.search(r'/(\d{5,15})/(\d{5,15})', base_path)
+        if match_slash:
+            return {"shop_id": match_slash.group(1), "item_id": match_slash.group(2)}
+
+        # Dạng 4: Tham số truy vấn ?item_id=...&shop_id=... hoặc ?itemid=...&shopid=...
+        try:
+            parsed_q = urllib.parse.parse_qs(urllib.parse.urlparse(clean_url).query)
+            item_q = parsed_q.get("itemid") or parsed_q.get("item_id")
+            if item_q:
+                shop_q = parsed_q.get("shopid") or parsed_q.get("shop_id") or ["0"]
+                return {"shop_id": shop_q[0], "item_id": item_q[0]}
+        except Exception:
+            pass
+
+        # Dạng 5: Tìm các cụm số nguyên lớn (6-15 chữ số) trong đường dẫn
+        digits = re.findall(r'\b\d{6,15}\b', base_path)
         if len(digits) >= 2:
             return {"shop_id": digits[-2], "item_id": digits[-1]}
         elif len(digits) == 1:

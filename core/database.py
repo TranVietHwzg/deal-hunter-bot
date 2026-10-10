@@ -182,15 +182,51 @@ def init_db():
     );
     """)
 
+    # Đồng bộ các cột tương thích ngược giữa SQLite và schema mới
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+    if cursor.fetchone():
+        p_cols = [c[1] for c in cursor.execute("PRAGMA table_info(products)").fetchall()]
+        if "item_id_on_platform" not in p_cols and "item_id" in p_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN item_id_on_platform TEXT")
+            cursor.execute("UPDATE products SET item_id_on_platform = item_id WHERE item_id_on_platform IS NULL")
+        if "platform_id" not in p_cols and "platform" in p_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN platform_id TEXT DEFAULT 'SHOPEE'")
+            cursor.execute("UPDATE products SET platform_id = platform WHERE platform_id IS NULL")
+        if "baseline_market_price" not in p_cols and "baseline_price" in p_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN baseline_market_price REAL")
+            cursor.execute("UPDATE products SET baseline_market_price = baseline_price WHERE baseline_market_price IS NULL")
+        if "baseline_price" not in p_cols and "baseline_market_price" in p_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN baseline_price REAL")
+            cursor.execute("UPDATE products SET baseline_price = baseline_market_price WHERE baseline_price IS NULL")
+        if "item_id" not in p_cols and "item_id_on_platform" in p_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN item_id TEXT")
+            cursor.execute("UPDATE products SET item_id = item_id_on_platform WHERE item_id IS NULL")
+        if "platform" not in p_cols and "platform_id" in p_cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN platform TEXT DEFAULT 'SHOPEE'")
+            cursor.execute("UPDATE products SET platform = platform_id WHERE platform IS NULL")
+        conn.commit()
+
     # 6. Bảng Lịch sử giá (Chống giá ảo)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS price_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id TEXT NOT NULL,
+        product_id TEXT,
+        item_id TEXT,
         price REAL NOT NULL,
         recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
+
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='price_history'")
+    if cursor.fetchone():
+        ph_cols = [c[1] for c in cursor.execute("PRAGMA table_info(price_history)").fetchall()]
+        if "product_id" not in ph_cols and "item_id" in ph_cols:
+            cursor.execute("ALTER TABLE price_history ADD COLUMN product_id TEXT")
+            cursor.execute("UPDATE price_history SET product_id = item_id WHERE product_id IS NULL")
+        if "item_id" not in ph_cols and "product_id" in ph_cols:
+            cursor.execute("ALTER TABLE price_history ADD COLUMN item_id TEXT")
+            cursor.execute("UPDATE price_history SET item_id = product_id WHERE item_id IS NULL")
+        conn.commit()
 
     # 7. Bảng Watchlist
     cursor.execute("""
@@ -463,20 +499,39 @@ def get_all_vouchers(active_only=True):
 def add_product(item_id, shop_id, name, url, image_url, target_mode, target_value, baseline_price):
     conn = get_connection()
     cursor = conn.cursor()
-    import uuid
-    p_id = str(uuid.uuid4())
-    cursor.execute("""
-    INSERT INTO products (id, platform_id, item_id_on_platform, shop_id, name, product_url, image_url, target_mode, target_value, baseline_price, current_price, final_price)
-    VALUES (?, 'SHOPEE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(item_id_on_platform) DO UPDATE SET
-        name=excluded.name,
-        product_url=excluded.product_url,
-        image_url=excluded.image_url,
-        target_mode=excluded.target_mode,
-        target_value=excluded.target_value,
-        baseline_market_price=excluded.baseline_market_price,
-        updated_at=CURRENT_TIMESTAMP;
-    """, (p_id, item_id, shop_id, name, url, image_url, target_mode, target_value, baseline_price, baseline_price, baseline_price))
+    
+    # Kiểm tra xem sản phẩm đã tồn tại chưa
+    cursor.execute("SELECT id FROM products WHERE item_id = ? OR item_id_on_platform = ?", (str(item_id), str(item_id)))
+    exist = cursor.fetchone()
+    if exist:
+        cursor.execute("""
+        UPDATE products SET
+            name = ?,
+            product_url = ?,
+            image_url = ?,
+            target_mode = ?,
+            target_value = ?,
+            baseline_price = ?,
+            baseline_market_price = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """, (name, url, image_url, target_mode, target_value, baseline_price, baseline_price, exist[0]))
+    else:
+        cursor.execute("""
+        INSERT INTO products (
+            platform, platform_id, item_id, item_id_on_platform, shop_id,
+            name, product_url, image_url, target_mode, target_value,
+            baseline_price, baseline_market_price, current_price, final_price
+        ) VALUES (
+            'SHOPEE', 'SHOPEE', ?, ?, ?,
+            ?, ?, ?, ?, ?,
+            ?, ?, ?, ?
+        )
+        """, (
+            str(item_id), str(item_id), str(shop_id),
+            name, url, image_url, target_mode, target_value,
+            baseline_price, baseline_price, baseline_price, baseline_price
+        ))
     conn.commit()
     conn.close()
 
@@ -491,18 +546,21 @@ def update_product_evaluation(item_id, current_price, final_price, discount_perc
         is_deal_ready = ?,
         applied_vouchers_json = ?,
         updated_at = CURRENT_TIMESTAMP
-    WHERE item_id_on_platform = ?;
-    """, (current_price, final_price, discount_percent, is_deal_ready, json.dumps(applied_vouchers, ensure_ascii=False), item_id))
+    WHERE item_id = ? OR item_id_on_platform = ?;
+    """, (current_price, final_price, discount_percent, is_deal_ready, json.dumps(applied_vouchers, ensure_ascii=False), str(item_id), str(item_id)))
     
     # Ghi nhận lịch sử giá
-    cursor.execute("INSERT INTO price_history (product_id, price) VALUES (?, ?)", (item_id, current_price))
+    try:
+        cursor.execute("INSERT INTO price_history (item_id, product_id, price) VALUES (?, ?, ?)", (str(item_id), str(item_id), current_price))
+    except Exception:
+        cursor.execute("INSERT INTO price_history (item_id, price) VALUES (?, ?)", (str(item_id), current_price))
     conn.commit()
     conn.close()
 
 def delete_product(item_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM products WHERE item_id_on_platform = ?", (item_id,))
+    cursor.execute("DELETE FROM products WHERE item_id = ? OR item_id_on_platform = ?", (str(item_id), str(item_id)))
     conn.commit()
     conn.close()
 
@@ -524,7 +582,7 @@ def get_stats() -> Dict[str, Any]:
 def get_product_by_id(item_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM products WHERE item_id_on_platform = ?", (item_id,))
+    cursor.execute("SELECT * FROM products WHERE item_id = ? OR item_id_on_platform = ? OR id = ?", (str(item_id), str(item_id), str(item_id)))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -532,7 +590,7 @@ def get_product_by_id(item_id):
 def get_product_price_history(item_id: str, limit: int = 30) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT price, recorded_at FROM price_history WHERE product_id = ? ORDER BY id DESC LIMIT ?", (item_id, limit))
+    cursor.execute("SELECT price, recorded_at FROM price_history WHERE item_id = ? OR product_id = ? ORDER BY id DESC LIMIT ?", (str(item_id), str(item_id), limit))
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]

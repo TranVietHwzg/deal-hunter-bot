@@ -73,12 +73,17 @@ def api_get_products():
 
 @app.post("/api/products")
 async def api_add_product(payload: AddProductPayload):
-    parsed = shopee_connector.parse_shopee_url(payload.url)
-    shop_id, item_id = parsed["shop_id"], parsed["item_id"]
+    parsed = await shopee_connector.resolve_url_and_parse(payload.url)
+    shop_id, item_id = parsed.get("shop_id"), parsed.get("item_id")
     if not item_id:
         return {"ok": False, "error": "Không thể trích xuất mã sản phẩm từ link Shopee!"}
 
-    details = await shopee_connector.fetch_product_details(item_id, shop_id)
+    details = await shopee_connector.fetch_product_details(
+        item_id,
+        shop_id,
+        name_hint=parsed.get("name"),
+        image_hint=parsed.get("image_url")
+    )
     database.add_product(
         item_id=item_id,
         shop_id=shop_id,

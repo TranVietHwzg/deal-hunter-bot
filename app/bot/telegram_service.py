@@ -181,7 +181,7 @@ class TelegramBotService:
         if not match:
             return False
 
-        raw_url = match.group(1)
+        raw_url = match.group(1).rstrip(".,;!?'\")>")
         if "shopee.vn" not in raw_url and "shp.ee" not in raw_url:
             return False
 
@@ -195,7 +195,7 @@ class TelegramBotService:
             return True
 
         # Trích xuất mục tiêu giá nếu có kèm theo trong tin nhắn
-        remainder = text.replace(raw_url, "").strip()
+        remainder = text.replace(match.group(1), "").strip()
         target_val = 30.0 # Mặc định giảm 30%
         target_mode = "PERCENT"
 
@@ -227,7 +227,12 @@ class TelegramBotService:
                         target_val = val_num
 
         # Lấy thông tin chi tiết từ Shopee
-        details = await self.shopee_connector.fetch_product_details(item_id, shop_id)
+        details = await self.shopee_connector.fetch_product_details(
+            item_id,
+            shop_id,
+            name_hint=parsed.get("name"),
+            image_hint=parsed.get("image_url")
+        )
         name = details.get("name", f"Sản phẩm {item_id}")
         base_price = details.get("original_price") or details.get("current_price", 500000.0)
 

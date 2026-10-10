@@ -7,6 +7,7 @@
   "tests/test_connectors_mock.py::test_mock_three_platforms_ingestion",
   "tests/test_direct_link_and_buttons.py::test_main_menu_keyboard_layout",
   "tests/test_direct_link_and_buttons.py::test_parse_various_shopee_urls",
+  "tests/test_direct_link_and_buttons.py::test_resolve_short_link_s_shopee_vn[asyncio]",
   "tests/test_junk_filter.py::test_database_hard_constraint_blocks_freeship",
   "tests/test_junk_filter.py::test_freeship_pattern_matching",
   "tests/test_junk_filter.py::test_is_freeship_exclusion",

@@ -24,10 +24,15 @@ def parse_shopee_url(url: str):
     if match2:
         return match2.group(1), match2.group(2)
         
-    # Dạng 3: dạng số ở đuôi
-    match3 = re.findall(r'\d+', clean_url)
-    if len(match3) >= 2:
-        return match3[-2], match3[-1]
+    # Dạng 3: Đường dẫn 2 cụm số /shop_id/item_id
+    match3 = re.search(r'/(\d{5,15})/(\d{5,15})', clean_url)
+    if match3:
+        return match3.group(1), match3.group(2)
+
+    # Dạng 4: dạng số ở đuôi
+    match4 = re.findall(r'\b\d{6,15}\b', clean_url)
+    if len(match4) >= 2:
+        return match4[-2], match4[-1]
 
     return None, None
 
