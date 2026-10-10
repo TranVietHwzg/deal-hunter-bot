@@ -1,0 +1,14 @@
+{
+  "telegram": {
+    "bot_token": "8914288470:AAHZz1hKU4yuwOBU5ovK8cOjOyU0E0P69Kw",
+    "chat_id": "8483531921",
+    "is_muted": false
+  },
+  "settings": {
+    "min_discount_percent": 30,
+    "normal_interval_seconds": 30,
+    "turbo_interval_seconds": 2,
+    "focus_high_tier_vouchers": true,
+    "web_port": 8000
+  }
+}
