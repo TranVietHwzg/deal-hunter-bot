@@ -7,6 +7,7 @@ from repositories.voucher_repository import VoucherRepository
 from core.upcoming_voucher_discovery import UpcomingVoucherDiscovery
 from sources.shopee_platform_campaigns import ShopeePlatformCampaignSource
 from sources.shopee_shop_campaigns import ShopeeShopCampaignSource
+from sources.community_voucher_source import CommunityVoucherSource
 
 class DiscoveryService:
     def __init__(
@@ -19,6 +20,7 @@ class DiscoveryService:
         self.discovery = UpcomingVoucherDiscovery(self.voucher_repo)
         self.platform_source = ShopeePlatformCampaignSource()
         self.shop_source = ShopeeShopCampaignSource()
+        self.community_source = CommunityVoucherSource()
 
     async def run_scan(
         self,
@@ -57,7 +59,15 @@ class DiscoveryService:
             except Exception as e:
                 errors.append(f"Shop source error: {e}")
 
-        # 3. Phân tích & Xử lý qua UpcomingVoucherDiscovery
+        # 3. Quét Community & KOC feeds
+        if scan_mode in (ScanMode.AUTO, ScanMode.MANUAL_ALL, ScanMode.MANUAL_PLATFORM):
+            try:
+                community_items = await self.community_source.fetch_vouchers()
+                collected_items.extend(community_items)
+            except Exception as e:
+                errors.append(f"Community source error: {e}")
+
+        # 4. Phân tích & Xử lý qua UpcomingVoucherDiscovery
         proc_res = self.discovery.process_collected_vouchers(
             collected_items,
             min_fixed_discount=min_fixed_discount,
