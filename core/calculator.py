@@ -1,17 +1,25 @@
 """
 Module tính toán gộp mã đa tầng (Voucher Stacking) & Đánh giá mức giảm giá thực tế
+PHIÊN BẢN CHUẨN PRODUCTION: ZERO FREESHIP BẮT BUỘC
 """
+from typing import Dict, Any, List
+from app.core.stacking_engine import calculate_stacked_price
+from app.core.junk_filter import is_freeship
 
 def calculate_discount_value(spend_amount, voucher):
-    min_spend = voucher.get("min_spend", 0)
+    # Loại trừ ngay nếu dính dáng freeship
+    if is_freeship(voucher)[0]:
+        return 0
+
+    min_spend = float(voucher.get("min_spend") or 0.0)
     if spend_amount < min_spend:
         return 0
-    
-    d_type = voucher.get("discount_type", "FIXED")
-    d_val = voucher.get("discount_val", 0)
-    max_d = voucher.get("max_discount", 0)
-    
-    if d_type == "PERCENT":
+
+    d_type = str(voucher.get("discount_type", "FIXED_AMOUNT")).upper()
+    d_val = float(voucher.get("discount_value") or voucher.get("discount_val") or 0.0)
+    max_d = float(voucher.get("max_discount_amount") or voucher.get("max_discount") or 0.0)
+
+    if d_type in ["PERCENTAGE", "PERCENT"]:
         discount = spend_amount * (d_val / 100.0)
         if max_d > 0:
             discount = min(discount, max_d)
@@ -19,114 +27,85 @@ def calculate_discount_value(spend_amount, voucher):
     else:
         return min(d_val, spend_amount)
 
-def stack_vouchers_and_evaluate(product, available_vouchers, min_discount_threshold=30):
+def stack_vouchers_and_evaluate(product: Dict[str, Any], available_vouchers: List[Dict[str, Any]], min_discount_threshold: float = 15.0):
     """
-    Tính giá thực trả sau khi gộp mã:
-    Giá Thực Trả = Giá Niêm Yết - Mã Shop - Mã Sàn - Freeship
+    Tính giá thực trả sau khi gộp mã thuần túy giá sản phẩm:
+    Giá Thực Trả = Giá Niêm Yết - Giảm Trực Tiếp Shop - Mã Shop - Mã Sàn - Mã Live/Ngành
+    TUYỆT ĐỐI KHÔNG TÍNH FREESHIP.
     """
-    baseline_price = product.get("baseline_price") or product.get("current_price", 0)
-    current_price = product.get("current_price", baseline_price)
+    baseline_price = float(product.get("baseline_market_price") or product.get("baseline_price") or product.get("current_price", 0.0))
+    current_price = float(product.get("current_price") or baseline_price)
     shop_id = str(product.get("shop_id") or "")
+    shop_direct = max(0.0, baseline_price - current_price) if baseline_price > current_price else 0.0
 
-    applied_vouchers = []
-    
-    # 1. Phân loại voucher
-    shop_vouchers = [v for v in available_vouchers if v.get("voucher_type") == "SHOP" and str(v.get("shop_id", "")) == shop_id and v.get("is_active", 1) == 1]
-    platform_vouchers = [v for v in available_vouchers if v.get("voucher_type") in ("PLATFORM", "LIVE_VIDEO", "VIDEO", "LIVE", "CATEGORY", "CASHBACK") and v.get("is_active", 1) == 1]
-    freeship_vouchers = [v for v in available_vouchers if v.get("voucher_type") == "FREESHIP" and v.get("is_active", 1) == 1]
-    
-    # Ưu tiên voucher xịn (giảm nhiều nhất)
-    # Tầng 1: Áp mã của Shop
-    best_shop_voucher = None
-    best_shop_disc = 0
-    for v in shop_vouchers:
-        d = calculate_discount_value(current_price, v)
-        if d > best_shop_disc:
-            best_shop_disc = d
-            best_shop_voucher = v
-            
-    if best_shop_voucher and best_shop_disc > 0:
-        applied_vouchers.append({
-            "code": best_shop_voucher.get("voucher_code", "MÃ SHOP"),
-            "label": best_shop_voucher.get("label", f"Giảm {int(best_shop_disc):,}đ"),
-            "discount": best_shop_disc,
-            "type": "Mã Shop"
-        })
+    # Lọc sạch các voucher không phải freeship
+    clean_vouchers = [v for v in available_vouchers if not is_freeship(v)[0]]
 
-    price_after_shop = max(0, current_price - best_shop_disc)
+    # 1. Phân loại voucher hợp lệ
+    shop_vouchers = [
+        v for v in clean_vouchers 
+        if str(v.get("voucher_type", "")).upper() == "SHOP" and (str(v.get("shop_id", "")) == shop_id or not shop_id)
+    ]
+    platform_vouchers = [
+        v for v in clean_vouchers 
+        if str(v.get("voucher_type", "")).upper() == "PLATFORM"
+    ]
+    live_cat_vouchers = [
+        v for v in clean_vouchers 
+        if str(v.get("voucher_type", "")).upper() in ["LIVE_VIDEO", "CATEGORY", "LIVE", "VIDEO"]
+    ]
 
-    # Tầng 2: Áp mã Sàn / Video / Live (trên giá trị sau khi trừ mã shop)
-    best_plat_voucher = None
-    best_plat_disc = 0
-    for v in platform_vouchers:
-        d = calculate_discount_value(price_after_shop, v)
-        if d > best_plat_disc:
-            best_plat_disc = d
-            best_plat_voucher = v
-            
-    if best_plat_voucher and best_plat_disc > 0:
-        v_type_label = best_plat_voucher.get("category") or "Mã Sàn"
-        applied_vouchers.append({
-            "code": best_plat_voucher.get("voucher_code", "MÃ SÀN"),
-            "label": best_plat_voucher.get("label", f"Giảm {int(best_plat_disc):,}đ"),
-            "discount": best_plat_disc,
-            "type": v_type_label
-        })
+    # Tìm mã tốt nhất từng tầng
+    best_shop_v = max(shop_vouchers, key=lambda v: calculate_discount_value(current_price, v), default=None)
+    best_plat_v = max(platform_vouchers, key=lambda v: calculate_discount_value(current_price, v), default=None)
+    best_live_v = max(live_cat_vouchers, key=lambda v: calculate_discount_value(current_price, v), default=None)
 
-    price_after_plat = max(0, price_after_shop - best_plat_disc)
+    # Tính toán gộp qua Stacking Engine chuẩn
+    stack_res = calculate_stacked_price(
+        product_price=current_price,
+        shop_direct_discount=shop_direct,
+        shop_voucher=best_shop_v,
+        platform_voucher=best_plat_v,
+        category_live_voucher=best_live_v
+    )
 
-    # Tầng 3: Freeship (nếu có mã hỗ trợ ship)
-    freeship_disc = 0
-    if freeship_vouchers and price_after_plat > 0:
-        v = freeship_vouchers[0]
-        f_val = v.get("discount_val", 30000)
-        freeship_disc = f_val
-        applied_vouchers.append({
-            "code": v.get("voucher_code", "FREESHIP"),
-            "label": v.get("label", "Hỗ trợ 30.000đ vận chuyển"),
-            "discount": freeship_disc,
-            "type": "Freeship"
-        })
+    final_price = stack_res["final_price"]
+    savings = (baseline_price - final_price) if baseline_price > 0 else stack_res["total_savings"]
+    real_discount_pct = round((savings / baseline_price) * 100.0, 1) if baseline_price > 0 else stack_res["discount_percent"]
 
-    final_price = max(0, price_after_plat) # Lưu ý: giá hàng thực trả không tính âm
+    # Đánh giá mục tiêu
+    target_mode = str(product.get("target_mode", "PERCENT")).upper()
+    target_value = float(product.get("target_value", 30.0))
 
-    # 2. Tính % giảm giá thực tế so với baseline (thị trường chuẩn)
-    if baseline_price > 0:
-        real_discount_pct = round(((baseline_price - final_price) / baseline_price) * 100, 1)
-    else:
-        real_discount_pct = 0
-
-    # 3. Đánh giá điều kiện thỏa mãn
-    target_mode = product.get("target_mode", "PERCENT")
-    target_val = float(product.get("target_value", 30))
-    
-    is_deal_ready = False
     if target_mode == "PERCENT":
-        # Điều kiện: Đạt mức % người dùng đặt VÀ tối thiểu phải >= min_discount_threshold (30%)
-        if real_discount_pct >= max(target_val, min_discount_threshold):
-            is_deal_ready = True
-    elif target_mode == "PRICE":
-        # Điều kiện: Đạt mức giá tiền người dùng muốn VÀ % giảm thực tế >= 30%
-        if final_price <= target_val and real_discount_pct >= min_discount_threshold:
-            is_deal_ready = True
-
-    # 4. Phân cấp huy hiệu
-    if real_discount_pct >= 70:
-        tier_label = "🚨 [SẬP GIÁ XẢ KHO ≥ 70%]"
-    elif real_discount_pct >= 50:
-        tier_label = "⚡️ [SIÊU DEAL GIẢM NỬA GIÁ ≥ 50%]"
-    elif real_discount_pct >= 30:
-        tier_label = "🔥 [DEAL HỜI XỊN ≥ 30%]"
+        is_deal_ready = real_discount_pct >= target_value
     else:
-        tier_label = "TIÊU CHUẨN (< 30%)"
+        is_deal_ready = final_price <= target_value
+
+    if real_discount_pct >= 50:
+        tier_label = "🔥🔥 [SIÊU DEAL KHỦNG - GIẢM ≥ 50%]"
+    elif real_discount_pct >= 30:
+        tier_label = "⚡️ [DEAL NGON - GIẢM ≥ 30%]"
+    else:
+        tier_label = "✨ [DEAL TIẾT KIỆM]"
+
+    applied_list = []
+    for av in stack_res["applied_vouchers"]:
+        applied_list.append({
+            "code": av.get("id"),
+            "label": f"{av.get('title')} (-{int(av.get('discount_deducted', 0)):,}đ)",
+            "discount": av.get("discount_deducted"),
+            "type": av.get("type")
+        })
 
     return {
         "baseline_price": baseline_price,
         "current_price": current_price,
         "final_price": final_price,
-        "savings": max(0, baseline_price - final_price),
+        "savings": savings,
         "discount_percent": real_discount_pct,
         "is_deal_ready": is_deal_ready,
-        "applied_vouchers": applied_vouchers,
-        "tier_label": tier_label
+        "tier_label": tier_label,
+        "confidence": stack_res["confidence"],
+        "applied_vouchers": applied_list
     }

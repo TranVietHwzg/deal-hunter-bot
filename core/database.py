@@ -1,7 +1,8 @@
 import sqlite3
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals.db")
 
@@ -13,125 +14,471 @@ def get_connection():
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # 1. Bảng sản phẩm theo dõi (Watchlist)
+
+    # 1. Bảng Platforms
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        platform TEXT DEFAULT 'SHOPEE',
-        item_id TEXT UNIQUE,
-        shop_id TEXT,
-        name TEXT,
-        product_url TEXT,
-        image_url TEXT,
-        target_mode TEXT DEFAULT 'PERCENT',  -- 'PERCENT' hoặc 'PRICE'
-        target_value REAL,                    -- ví dụ: 30 (nghĩa là 30%) hoặc 500000 (VND)
-        baseline_price REAL,                  -- Giá thị trường chuẩn
-        current_price REAL,                   -- Giá niêm yết hiện tại
-        final_price REAL,                     -- Giá thực trả sau khi gộp mã
-        discount_percent REAL DEFAULT 0,      -- % giảm thực tế
-        is_deal_ready INTEGER DEFAULT 0,      -- 1 nếu đạt mục tiêu
-        applied_vouchers_json TEXT,           -- Danh sách mã đã gộp
+    CREATE TABLE IF NOT EXISTS platforms (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        base_url TEXT NOT NULL,
+        is_enabled INTEGER NOT NULL DEFAULT 1,
+        rate_limit_per_minute INTEGER NOT NULL DEFAULT 60,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
 
-    # 2. Bảng lịch sử giá (chống nâng giá ảo)
+    # Kiểm tra xem bảng vouchers cũ có cần migrate không
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vouchers'")
+    if cursor.fetchone():
+        cols = [c[1] for c in cursor.execute("PRAGMA table_info(vouchers)").fetchall()]
+        if "title" not in cols:
+            # Backup & recreate
+            cursor.execute("ALTER TABLE vouchers RENAME TO old_vouchers")
+            cursor.execute("""
+            CREATE TABLE vouchers (
+                id TEXT PRIMARY KEY,
+                platform_id TEXT NOT NULL DEFAULT 'SHOPEE',
+                voucher_id_on_platform TEXT NOT NULL,
+                voucher_code TEXT,
+                voucher_type TEXT NOT NULL,
+                category TEXT,
+                title TEXT NOT NULL,
+                description TEXT,
+                discount_type TEXT NOT NULL,
+                discount_value REAL NOT NULL,
+                max_discount_amount REAL,
+                min_spend REAL NOT NULL DEFAULT 0,
+                shop_id TEXT,
+                shop_name TEXT,
+                claim_url TEXT NOT NULL,
+                guide TEXT,
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                quality_score INTEGER NOT NULL DEFAULT 0,
+                is_hot INTEGER NOT NULL DEFAULT 0,
+                is_freeship INTEGER NOT NULL DEFAULT 0,
+                start_time TEXT,
+                end_time TEXT,
+                last_verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_platform_voucher UNIQUE (platform_id, voucher_id_on_platform),
+                CONSTRAINT chk_no_freeship CHECK (is_freeship = 0)
+            );
+            """)
+            # Di chuyển dữ liệu cũ sang, lọc sạch freeship
+            old_rows = cursor.execute("SELECT * FROM old_vouchers").fetchall()
+            for r in old_rows:
+                r_dict = dict(r)
+                lbl = r_dict.get("label") or "Voucher"
+                cat = r_dict.get("category") or ""
+                vtype = r_dict.get("voucher_type") or "PLATFORM"
+                # Bài trừ Freeship
+                if "ship" in lbl.lower() or "ship" in cat.lower() or "ship" in vtype.lower():
+                    continue
+                v_code = r_dict.get("voucher_code")
+                v_ext = r_dict.get("voucher_id") or v_code or str(r_dict.get("id"))
+                cursor.execute("""
+                INSERT OR IGNORE INTO vouchers (
+                    id, platform_id, voucher_id_on_platform, voucher_code, voucher_type, category,
+                    title, description, discount_type, discount_value, max_discount_amount, min_spend,
+                    shop_id, claim_url, guide, status, quality_score, is_hot, is_freeship
+                ) VALUES (?, 'SHOPEE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 80, 0, 0)
+                """, (
+                    f"SHOPEE_{v_ext}", v_ext, v_code, vtype, cat,
+                    lbl, lbl, r_dict.get("discount_type") or "FIXED_AMOUNT",
+                    float(r_dict.get("discount_val") or 0), float(r_dict.get("max_discount") or 0),
+                    float(r_dict.get("min_spend") or 0), r_dict.get("shop_id"),
+                    r_dict.get("claim_url") or "https://shopee.vn", r_dict.get("guide") or ""
+                ))
+            cursor.execute("DROP TABLE old_vouchers")
+            conn.commit()
+
+    # 2. Bảng Kho Voucher (Có khóa CHECK is_freeship = 0 để bài trừ Freeship tuyệt đối)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS vouchers (
+        id TEXT PRIMARY KEY,
+        platform_id TEXT NOT NULL DEFAULT 'SHOPEE',
+        voucher_id_on_platform TEXT NOT NULL,
+        voucher_code TEXT,
+        voucher_type TEXT NOT NULL, -- 'PLATFORM', 'SHOP', 'CATEGORY', 'LIVE_VIDEO'
+        category TEXT,              -- 'Shopee Live', 'Shopee Video', 'Điện Tử'...
+        title TEXT NOT NULL,
+        description TEXT,
+        discount_type TEXT NOT NULL, -- 'FIXED_AMOUNT', 'PERCENTAGE'
+        discount_value REAL NOT NULL,
+        max_discount_amount REAL,
+        min_spend REAL NOT NULL DEFAULT 0,
+        shop_id TEXT,
+        shop_name TEXT,
+        claim_url TEXT NOT NULL,
+        guide TEXT,
+        status TEXT NOT NULL DEFAULT 'ACTIVE', -- 'UPCOMING', 'ACTIVE', 'EXHAUSTED', 'RESTOCKED', 'EXPIRED'
+        quality_score INTEGER NOT NULL DEFAULT 0,
+        is_hot INTEGER NOT NULL DEFAULT 0,
+        is_freeship INTEGER NOT NULL DEFAULT 0,
+        start_time TEXT,
+        end_time TEXT,
+        last_verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uq_platform_voucher UNIQUE (platform_id, voucher_id_on_platform),
+        CONSTRAINT chk_no_freeship CHECK (is_freeship = 0)
+    );
+    """)
+
+    # 3. Bảng Voucher Conditions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS voucher_conditions (
+        id TEXT PRIMARY KEY,
+        voucher_id TEXT NOT NULL,
+        applies_to_category TEXT,
+        is_new_user_only INTEGER NOT NULL DEFAULT 0,
+        can_stack_with_shop INTEGER NOT NULL DEFAULT 1,
+        can_stack_with_platform INTEGER NOT NULL DEFAULT 0,
+        payment_method TEXT DEFAULT 'ALL',
+        device_restriction TEXT DEFAULT 'ALL',
+        required_action TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (voucher_id) REFERENCES vouchers(id) ON DELETE CASCADE
+    );
+    """)
+
+    # 4. Bảng Lịch sử trạng thái voucher (Restock radar)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS voucher_status_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        voucher_id TEXT NOT NULL,
+        previous_status TEXT NOT NULL,
+        new_status TEXT NOT NULL,
+        detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT,
+        FOREIGN KEY (voucher_id) REFERENCES vouchers(id) ON DELETE CASCADE
+    );
+    """)
+
+    # 5. Bảng Sản phẩm theo dõi (Products)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        id TEXT PRIMARY KEY,
+        platform_id TEXT NOT NULL DEFAULT 'SHOPEE',
+        item_id_on_platform TEXT NOT NULL UNIQUE,
+        shop_id TEXT,
+        name TEXT NOT NULL,
+        product_url TEXT NOT NULL,
+        image_url TEXT,
+        category_name TEXT,
+        brand_name TEXT,
+        target_mode TEXT DEFAULT 'PERCENT',
+        target_value REAL DEFAULT 30,
+        current_price REAL NOT NULL,
+        baseline_market_price REAL NOT NULL,
+        final_price REAL,
+        discount_percent REAL DEFAULT 0,
+        is_deal_ready INTEGER DEFAULT 0,
+        applied_vouchers_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 6. Bảng Lịch sử giá (Chống giá ảo)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS price_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id TEXT,
-        price REAL,
+        product_id TEXT NOT NULL,
+        price REAL NOT NULL,
         recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
 
-    # 3. Bảng kho Voucher (ưu tiên voucher xịn)
+    # 7. Bảng Watchlist
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS vouchers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        voucher_id TEXT UNIQUE,
-        platform TEXT DEFAULT 'SHOPEE',
-        voucher_code TEXT,
-        voucher_type TEXT,              -- 'SHOP', 'PLATFORM', 'FREESHIP', 'LIVE_VIDEO', 'VIDEO', 'LIVE', 'CATEGORY', 'CASHBACK'
-        category TEXT,                  -- 'Shopee Video', 'Shopee Live', 'Mã Toàn Sàn', 'Freeship'...
-        discount_type TEXT,             -- 'FIXED' hoặc 'PERCENT'
-        discount_val REAL,              -- Ví dụ: 50000 hoặc 15
-        max_discount REAL,              -- Mức giảm tối đa
-        min_spend REAL,                 -- Đơn tối thiểu
-        shop_id TEXT,
-        label TEXT,                     -- Tên hiển thị (VD: Giảm 50k đơn từ 300k)
-        claim_url TEXT,                 -- Link trực tiếp để bấm vào lưu mã
-        guide TEXT,                     -- Hướng dẫn chi tiết cách áp mã
-        is_high_tier INTEGER DEFAULT 1, -- 1 nếu là voucher xịn (>=50k hoặc >=15%)
-        is_active INTEGER DEFAULT 1,
-        expired_at TEXT
+    CREATE TABLE IF NOT EXISTS watchlists (
+        id TEXT PRIMARY KEY,
+        target_type TEXT NOT NULL, -- 'PRODUCT_URL', 'KEYWORD', 'CATEGORY', 'BRAND'
+        target_value TEXT NOT NULL,
+        target_price REAL,
+        min_discount_percent INTEGER DEFAULT 30,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
 
-    # Tự động nâng cấp cột nếu database đã tồn tại từ trước
-    for col, col_type in [("category", "TEXT"), ("claim_url", "TEXT"), ("guide", "TEXT")]:
-        try:
-            cursor.execute(f"ALTER TABLE vouchers ADD COLUMN {col} {col_type}")
-        except Exception:
-            pass
-
-    # 4. Bảng lưu vết cảnh báo đã gửi (chống spam)
+    # 8. Bảng Khớp Voucher & Giá thực trả (Voucher Product Matches)
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS alerts_sent (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_id TEXT,
+    CREATE TABLE IF NOT EXISTS voucher_product_matches (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        applied_voucher_ids TEXT NOT NULL,
+        original_price REAL NOT NULL,
+        shop_direct_discount REAL DEFAULT 0,
+        shop_voucher_discount REAL DEFAULT 0,
+        platform_voucher_discount REAL DEFAULT 0,
+        category_live_voucher_discount REAL DEFAULT 0,
+        final_price REAL NOT NULL,
+        real_savings REAL NOT NULL,
+        real_discount_percent REAL NOT NULL,
+        stacking_confidence TEXT NOT NULL, -- 'VERIFIED', 'NEEDS_CHECK', 'CANNOT_STACK'
+        evaluated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    );
+    """)
+
+    # 9. Bảng Cảnh Báo & Chống Trùng Lặp (Alert Events)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS alert_events (
+        id TEXT PRIMARY KEY,
+        alert_type TEXT NOT NULL, -- 'HOT_VOUCHER', 'TARGET_MET', 'RESTOCKED_VOUCHER'
+        dedup_hash TEXT NOT NULL UNIQUE,
+        voucher_id TEXT,
+        product_id TEXT,
+        quality_score INTEGER,
         final_price REAL,
-        discount_percent REAL,
+        message_payload TEXT NOT NULL,
         sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
 
+    # 10. Bảng Cài đặt người dùng (User Settings)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_settings (
+        id TEXT PRIMARY KEY DEFAULT 'PERSONAL_USER',
+        telegram_chat_id TEXT NOT NULL,
+        min_quality_score INTEGER NOT NULL DEFAULT 70,
+        min_save_amount REAL NOT NULL DEFAULT 50000,
+        allow_new_user_vouchers INTEGER NOT NULL DEFAULT 0,
+        active_platforms TEXT NOT NULL DEFAULT '["SHOPEE", "LAZADA", "TIKTOK"]',
+        is_muted INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 11. Bảng Nhật ký sức khỏe connector (Connector Health Logs)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS connector_health_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform_id TEXT NOT NULL,
+        status TEXT NOT NULL, -- 'HEALTHY', 'DEGRADED', 'CIRCUIT_OPEN'
+        latency_ms INTEGER NOT NULL,
+        http_status INTEGER,
+        error_message TEXT,
+        circuit_state TEXT NOT NULL, -- 'CLOSED', 'OPEN', 'HALF_OPEN'
+        checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # Nạp 3 sàn mặc định nếu chưa có
+    cursor.execute("""
+    INSERT OR IGNORE INTO platforms (id, name, base_url, is_enabled, rate_limit_per_minute)
+    VALUES 
+    ('SHOPEE', 'Shopee Vietnam', 'https://shopee.vn', 1, 60),
+    ('LAZADA', 'Lazada Vietnam', 'https://www.lazada.vn', 0, 30),
+    ('TIKTOK', 'TikTok Shop Vietnam', 'https://shop.tiktok.com', 0, 30);
+    """)
+
+    # Dọn sạch triệt để mọi voucher Freeship còn sót từ bản cũ
+    cursor.execute("""
+    DELETE FROM vouchers 
+    WHERE LOWER(voucher_type) LIKE '%ship%' 
+       OR LOWER(title) LIKE '%freeship%' 
+       OR LOWER(title) LIKE '%vận chuyển%'
+       OR LOWER(title) LIKE '%phí ship%'
+       OR LOWER(category) LIKE '%freeship%'
+       OR is_freeship != 0;
+    """)
+
     conn.commit()
     conn.close()
 
-def add_product(item_id, shop_id, name, url, image_url, target_mode, target_value, baseline_price):
+# ----------------- CÁC HÀM TRUY XUẤT VOUCHER & PRODUCT -----------------
+
+def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
+    """Thêm hoặc cập nhật voucher với ràng buộc chống freeship và tính score"""
+    from app.core.junk_filter import is_freeship, validate_voucher
+    from app.core.scoring_engine import calculate_voucher_quality_score
+
+    # Kiểm tra bài trừ Freeship tuyệt đối
+    is_ship, reason = is_freeship(voucher_data)
+    if is_ship:
+        return False
+
+    is_valid, _ = validate_voucher(voucher_data, allow_new_user=voucher_data.get("allow_new_user", False))
+    if not is_valid:
+        return False
+
+    # Tính điểm chất lượng 0 - 100
+    score, _ = calculate_voucher_quality_score(voucher_data)
+    is_hot = 1 if score >= 85 else 0
+
+    v_id = str(voucher_data.get("id") or f"{voucher_data.get('platform_id', 'SHOPEE')}_{voucher_data.get('voucher_id_on_platform') or voucher_data.get('voucher_code')}")
+    plat_id = str(voucher_data.get("platform_id", "SHOPEE")).upper()
+    v_ext_id = str(voucher_data.get("voucher_id_on_platform") or voucher_data.get("voucher_code") or v_id)
+    v_code = voucher_data.get("voucher_code")
+    v_type = str(voucher_data.get("voucher_type", "PLATFORM")).upper()
+    category = voucher_data.get("category", "")
+    title = str(voucher_data.get("title", ""))
+    desc = voucher_data.get("description", "")
+    d_type = str(voucher_data.get("discount_type", "FIXED_AMOUNT")).upper()
+    d_val = float(voucher_data.get("discount_value") or voucher_data.get("discount_val") or 0.0)
+    max_d = float(voucher_data.get("max_discount_amount") or voucher_data.get("max_discount") or 0.0)
+    min_sp = float(voucher_data.get("min_spend") or 0.0)
+    shop_id = str(voucher_data.get("shop_id")) if voucher_data.get("shop_id") else None
+    shop_name = voucher_data.get("shop_name", "")
+    claim_url = voucher_data.get("claim_url", "https://shopee.vn")
+    guide = voucher_data.get("guide", "")
+    status = str(voucher_data.get("status", "ACTIVE")).upper()
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO products (item_id, shop_id, name, product_url, image_url, target_mode, target_value, baseline_price, current_price, final_price)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(item_id) DO UPDATE SET
-        target_mode = excluded.target_mode,
-        target_value = excluded.target_value,
-        baseline_price = excluded.baseline_price,
-        updated_at = CURRENT_TIMESTAMP
-    """, (item_id, shop_id, name, url, image_url, target_mode, target_value, baseline_price, baseline_price, baseline_price))
+    INSERT INTO vouchers (
+        id, platform_id, voucher_id_on_platform, voucher_code, voucher_type, category,
+        title, description, discount_type, discount_value, max_discount_amount, min_spend,
+        shop_id, shop_name, claim_url, guide, status, quality_score, is_hot, is_freeship,
+        last_verified_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(platform_id, voucher_id_on_platform) DO UPDATE SET
+        voucher_code=excluded.voucher_code,
+        voucher_type=excluded.voucher_type,
+        category=excluded.category,
+        title=excluded.title,
+        description=excluded.description,
+        discount_type=excluded.discount_type,
+        discount_value=excluded.discount_value,
+        max_discount_amount=excluded.max_discount_amount,
+        min_spend=excluded.min_spend,
+        claim_url=excluded.claim_url,
+        guide=excluded.guide,
+        status=excluded.status,
+        quality_score=excluded.quality_score,
+        is_hot=excluded.is_hot,
+        last_verified_at=CURRENT_TIMESTAMP,
+        updated_at=CURRENT_TIMESTAMP;
+    """, (
+        v_id, plat_id, v_ext_id, v_code, v_type, category,
+        title, desc, d_type, d_val, max_d, min_sp,
+        shop_id, shop_name, claim_url, guide, status, score, is_hot
+    ))
     conn.commit()
-    product_id = cursor.lastrowid
     conn.close()
-    return product_id
+    return True
 
-def get_all_products():
+def get_vouchers(
+    min_score: int = 70,
+    hot_only: bool = False,
+    platform: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Lấy danh sách voucher chất lượng cao, bài trừ freeship"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM products ORDER BY is_deal_ready DESC, id DESC")
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return rows
 
-def get_product_by_id(product_id):
+    query = """
+    SELECT * FROM vouchers 
+    WHERE is_freeship = 0 AND status IN ('ACTIVE', 'RESTOCKED')
+      AND quality_score >= ?
+    """
+    params = [min_score]
+
+    if hot_only:
+        query += " AND is_hot = 1"
+    if platform and platform.upper() != "ALL":
+        query += " AND platform_id = ?"
+        params.append(platform.upper())
+
+    query += " ORDER BY quality_score DESC, discount_value DESC LIMIT 50"
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_voucher_by_id(voucher_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
+    cursor.execute("SELECT * FROM vouchers WHERE id = ? OR voucher_id_on_platform = ? OR voucher_code = ?", (voucher_id, voucher_id, voucher_id))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
 
-def delete_product(product_id):
+def record_alert_event(
+    alert_type: str,
+    dedup_hash: str,
+    message_payload: str,
+    voucher_id: Optional[str] = None,
+    product_id: Optional[str] = None,
+    quality_score: Optional[int] = None,
+    final_price: Optional[float] = None
+) -> bool:
+    """Ghi nhận cảnh báo và ngăn chặn trùng lặp"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM products WHERE id = ?", (product_id,))
+    try:
+        import uuid
+        e_id = str(uuid.uuid4())
+        cursor.execute("""
+        INSERT INTO alert_events (id, alert_type, dedup_hash, voucher_id, product_id, quality_score, final_price, message_payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (e_id, alert_type, dedup_hash, voucher_id, product_id, quality_score, final_price, message_payload))
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False # Đã gửi hash này rồi (trùng lặp)
+
+def is_alert_duplicate(dedup_hash: str) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM alert_events WHERE dedup_hash = ?", (dedup_hash,))
+    res = cursor.fetchone()
+    conn.close()
+    return res is not None
+
+def log_connector_health(platform_id: str, status: str, latency_ms: int, circuit_state: str, http_status: Optional[int] = None, error: Optional[str] = None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO connector_health_logs (platform_id, status, latency_ms, http_status, error_message, circuit_state)
+    VALUES (?, ?, ?, ?, ?, ?)
+    """, (platform_id, status, latency_ms, http_status, error, circuit_state))
     conn.commit()
     conn.close()
 
-def update_product_evaluation(item_id, current_price, final_price, discount_pct, is_ready, vouchers_list):
+# Backward compatibility functions
+def get_all_products():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM products ORDER BY id DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_all_vouchers(active_only=True):
+    return get_vouchers(min_score=0)
+
+def add_product(item_id, shop_id, name, url, image_url, target_mode, target_value, baseline_price):
+    conn = get_connection()
+    cursor = conn.cursor()
+    import uuid
+    p_id = str(uuid.uuid4())
+    cursor.execute("""
+    INSERT INTO products (id, platform_id, item_id_on_platform, shop_id, name, product_url, image_url, target_mode, target_value, baseline_price, current_price, final_price)
+    VALUES (?, 'SHOPEE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(item_id_on_platform) DO UPDATE SET
+        name=excluded.name,
+        product_url=excluded.product_url,
+        image_url=excluded.image_url,
+        target_mode=excluded.target_mode,
+        target_value=excluded.target_value,
+        baseline_market_price=excluded.baseline_market_price,
+        updated_at=CURRENT_TIMESTAMP;
+    """, (p_id, item_id, shop_id, name, url, image_url, target_mode, target_value, baseline_price, baseline_price, baseline_price))
+    conn.commit()
+    conn.close()
+
+def update_product_evaluation(item_id, current_price, final_price, discount_percent, is_deal_ready, applied_vouchers):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -142,102 +489,53 @@ def update_product_evaluation(item_id, current_price, final_price, discount_pct,
         is_deal_ready = ?,
         applied_vouchers_json = ?,
         updated_at = CURRENT_TIMESTAMP
-    WHERE item_id = ?
-    """, (current_price, final_price, discount_pct, 1 if is_ready else 0, json.dumps(vouchers_list, ensure_ascii=False), item_id))
+    WHERE item_id_on_platform = ?;
+    """, (current_price, final_price, discount_percent, is_deal_ready, json.dumps(applied_vouchers, ensure_ascii=False), item_id))
     
-    # Lưu vào lịch sử giá
-    cursor.execute("INSERT INTO price_history (item_id, price) VALUES (?, ?)", (item_id, current_price))
+    # Ghi nhận lịch sử giá
+    cursor.execute("INSERT INTO price_history (product_id, price) VALUES (?, ?)", (item_id, current_price))
     conn.commit()
     conn.close()
 
-def get_all_vouchers(only_active=True, only_high_tier=False, category=None):
+def delete_product(item_id):
     conn = get_connection()
     cursor = conn.cursor()
-    query = "SELECT * FROM vouchers WHERE 1=1"
-    params = []
-    if only_active:
-        query += " AND is_active = 1"
-    if only_high_tier:
-        query += " AND is_high_tier = 1"
-    if category:
-        query += " AND (category = ? OR voucher_type = ?)"
-        params.extend([category, category])
-    query += " ORDER BY is_high_tier DESC, discount_val DESC"
-    cursor.execute(query, params)
-    rows = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return rows
-
-def upsert_voucher(v_data):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-    INSERT INTO vouchers (voucher_id, platform, voucher_code, voucher_type, category, discount_type, discount_val, max_discount, min_spend, shop_id, label, claim_url, guide, is_high_tier, is_active, expired_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(voucher_id) DO UPDATE SET
-        is_active = excluded.is_active,
-        discount_val = excluded.discount_val,
-        category = excluded.category,
-        claim_url = excluded.claim_url,
-        guide = excluded.guide,
-        expired_at = excluded.expired_at
-    """, (
-        v_data["voucher_id"], v_data.get("platform", "SHOPEE"), v_data.get("voucher_code", ""),
-        v_data.get("voucher_type", "PLATFORM"), v_data.get("category", "Mã Toàn Sàn"),
-        v_data.get("discount_type", "PERCENT"), v_data.get("discount_val", 0),
-        v_data.get("max_discount", 0), v_data.get("min_spend", 0),
-        v_data.get("shop_id", None), v_data.get("label", ""),
-        v_data.get("claim_url", "https://shopee.vn/m/ma-giam-gia"),
-        v_data.get("guide", "Lưu mã tại trang khuyến mãi và áp mã khi thanh toán."),
-        1 if v_data.get("is_high_tier", True) else 0,
-        1 if v_data.get("is_active", True) else 0,
-        v_data.get("expired_at", "")
-    ))
+    cursor.execute("DELETE FROM products WHERE item_id_on_platform = ?", (item_id,))
     conn.commit()
     conn.close()
 
-def should_send_alert(item_id, current_final_price):
+def get_product_by_id(item_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT final_price FROM alerts_sent WHERE item_id = ? ORDER BY id DESC LIMIT 1", (item_id,))
+    cursor.execute("SELECT * FROM products WHERE item_id_on_platform = ?", (item_id,))
     row = cursor.fetchone()
     conn.close()
-    if not row:
-        return True, "DEAL_MOI" # Chưa gửi bao giờ
-    last_price = row["final_price"]
-    if current_final_price < last_price:
-        return True, "GIA_TOT_HON" # Giá rẻ hơn lần gửi trước
-    return False, "TRUNG_LAP"
+    return dict(row) if row else None
 
-def record_alert_sent(item_id, final_price, discount_pct):
+def get_product_price_history(item_id: str, limit: int = 30) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO alerts_sent (item_id, final_price, discount_percent) VALUES (?, ?, ?)", (item_id, final_price, discount_pct))
+    cursor.execute("SELECT price, recorded_at FROM price_history WHERE product_id = ? ORDER BY id DESC LIMIT ?", (item_id, limit))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_user_settings() -> Dict[str, Any]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM user_settings WHERE id = 'PERSONAL_USER'")
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute("INSERT OR IGNORE INTO user_settings (id, telegram_chat_id) VALUES ('PERSONAL_USER', '8483531921')")
+        conn.commit()
+        cursor.execute("SELECT * FROM user_settings WHERE id = 'PERSONAL_USER'")
+        row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+def update_user_settings(key: str, value: Any):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"UPDATE user_settings SET {key} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 'PERSONAL_USER'", (value,))
     conn.commit()
     conn.close()
-
-def get_stats():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) as total FROM products")
-    total_products = cursor.fetchone()["total"]
-    
-    cursor.execute("SELECT COUNT(*) as ready FROM products WHERE is_deal_ready = 1")
-    ready_deals = cursor.fetchone()["ready"]
-    
-    cursor.execute("SELECT COUNT(*) as total_v FROM vouchers WHERE is_active = 1")
-    active_vouchers = cursor.fetchone()["total_v"]
-
-    cursor.execute("SELECT COUNT(*) as alerts FROM alerts_sent")
-    total_alerts = cursor.fetchone()["alerts"]
-    
-    conn.close()
-    return {
-        "total_products": total_products,
-        "ready_deals": ready_deals,
-        "active_vouchers": active_vouchers,
-        "total_alerts": total_alerts
-    }
-
-# Khởi tạo db khi import
-init_db()

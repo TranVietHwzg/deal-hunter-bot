@@ -1,0 +1,19 @@
+[
+  "tests/test_anti_spam.py::test_alert_deduplication",
+  "tests/test_circuit_breaker.py::test_circuit_breaker_transitions",
+  "tests/test_circuit_breaker.py::test_token_bucket_rate_limiter",
+  "tests/test_connectors_mock.py::test_connector_fault_injection_and_circuit_breaker",
+  "tests/test_connectors_mock.py::test_invalid_corrupted_voucher_payload",
+  "tests/test_connectors_mock.py::test_mock_three_platforms_ingestion",
+  "tests/test_junk_filter.py::test_database_hard_constraint_blocks_freeship",
+  "tests/test_junk_filter.py::test_freeship_pattern_matching",
+  "tests/test_junk_filter.py::test_is_freeship_exclusion",
+  "tests/test_junk_filter.py::test_validate_voucher_rejects_freeship_and_junk",
+  "tests/test_scoring.py::test_freeship_always_returns_zero",
+  "tests/test_scoring.py::test_hot_voucher_score_gte_85",
+  "tests/test_scoring.py::test_low_value_voucher_score_lt_70",
+  "tests/test_scoring.py::test_penalties_applied",
+  "tests/test_stacking.py::test_four_tier_stacking_calculation",
+  "tests/test_stacking.py::test_stacking_percentage_and_max_ceiling",
+  "tests/test_stacking.py::test_zero_freeship_invariance"
+]
