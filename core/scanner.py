@@ -90,7 +90,7 @@ def calculate_adaptive_interval() -> int:
 
     return 3600
 
-async def background_radar_loop(bot_instance=None):
+async def background_radar_loop(bot_instance=None, config=None):
     """Vòng lặp chạy nền của Radar với tần suất thích ứng"""
     print("[Radar Scheduler] Khởi động tiến trình theo dõi mã sắp mở Shopee 24/7...")
     while True:
@@ -101,3 +101,8 @@ async def background_radar_loop(bot_instance=None):
 
         interval = calculate_adaptive_interval()
         await asyncio.sleep(interval)
+
+# Tương thích ngược
+run_scan_cycle = run_radar_cycle
+background_scanner_loop = background_radar_loop
+
