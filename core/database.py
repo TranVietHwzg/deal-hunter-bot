@@ -504,6 +504,21 @@ def delete_product(item_id):
     conn.commit()
     conn.close()
 
+def get_stats() -> Dict[str, Any]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    p_count = cursor.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+    r_count = cursor.execute("SELECT COUNT(*) FROM products WHERE is_deal_ready = 1").fetchone()[0]
+    v_count = cursor.execute("SELECT COUNT(*) FROM vouchers WHERE is_freeship = 0 AND status IN ('ACTIVE', 'RESTOCKED')").fetchone()[0]
+    hot_count = cursor.execute("SELECT COUNT(*) FROM vouchers WHERE is_freeship = 0 AND is_hot = 1").fetchone()[0]
+    conn.close()
+    return {
+        "total_products": p_count,
+        "ready_deals": r_count,
+        "total_vouchers": v_count,
+        "hot_vouchers": hot_count
+    }
+
 def get_product_by_id(item_id):
     conn = get_connection()
     cursor = conn.cursor()

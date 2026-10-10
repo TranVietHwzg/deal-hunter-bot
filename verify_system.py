@@ -21,15 +21,15 @@ def run_tests():
         "current_price": 650000,
         "shop_id": "88888",
         "target_mode": "PERCENT",
-        "target_value": 30.0
+        "target_value": 40.0
     }
     mock_vouchers = shopee.get_default_high_tier_vouchers()
-    res = calculator.stack_vouchers_and_evaluate(mock_product, mock_vouchers, min_discount_threshold=30)
-    print("Kết quả Deal 15.4%: Đạt mục tiêu =", res["is_deal_ready"])
-    assert res["is_deal_ready"] == False, "Deal < 30% phải bị từ chối!"
-    print("✅ Đã kiểm chứng: Deal < 30% bị từ chối chính xác.")
+    res = calculator.stack_vouchers_and_evaluate(mock_product, mock_vouchers)
+    print(f"Ket qua Deal 30.4% voi muc tieu 40%: Dat muc tieu = {res['is_deal_ready']}")
+    assert res["is_deal_ready"] == False, "Deal 30.4% voi muc tieu 40% phai bi tu choi!"
+    print(" Da kiem chung: Deal chua dat muc tieu bi tu choi chinh xac.")
 
-    # Thử nghiệm Deal đạt chuẩn >= 30%
+    # Thử nghiệm Deal đạt chuẩn >= 40%
     mock_vouchers_with_shop = mock_vouchers + [{
         "voucher_id": "SHOP_VOUCHER_120K",
         "voucher_code": "SHOP120K",
@@ -42,10 +42,10 @@ def run_tests():
         "label": "Mã Shop: Giảm 120k",
         "is_active": 1
     }]
-    res2 = calculator.stack_vouchers_and_evaluate(mock_product, mock_vouchers_with_shop, min_discount_threshold=30)
-    print(f"\nDeal có mã Shop: Giá thực trả = {res2['final_price']:,}đ, Giảm thật = {res2['discount_percent']}%, Huy hiệu = {res2['tier_label']}")
-    assert res2["is_deal_ready"] == True, "Deal >= 30% phải được chấp nhận!"
-    print("✅ Đã kiểm chứng: Deal >= 30% được duyệt chính xác.")
+    res2 = calculator.stack_vouchers_and_evaluate(mock_product, mock_vouchers_with_shop)
+    print(f"Deal co ma Shop: Gia thuc tra = {int(res2['final_price']):,}d, Giam that = {res2['discount_percent']}%, Dat muc tieu = {res2['is_deal_ready']}")
+    assert res2["is_deal_ready"] == True, "Deal >= 40% phai duoc chap nhan!"
+    print(" Da kiem chung: Deal dat muc tieu duoc duyet chinh xac.")
     print("\n✅ TẤT CẢ LOGIC BỘ LỌC ĐẠT CHUẨN 100%!")
 
 if __name__ == "__main__":
