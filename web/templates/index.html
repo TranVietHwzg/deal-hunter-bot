@@ -198,20 +198,50 @@
     </div>
 
     <!-- TAB 2: VOUCHERS -->
-    <div x-show="currentTab === 'vouchers'" class="space-y-4">
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <template x-for="v in vouchers" :key="v.voucher_id">
-          <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex justify-between items-center shadow-sm">
+    <div x-show="currentTab === 'vouchers'" class="space-y-6">
+      <!-- Category filter pills -->
+      <div class="flex flex-wrap gap-2 pb-1">
+        <button @click="voucherFilter = 'ALL'" :class="{ 'bg-indigo-600 text-white': voucherFilter === 'ALL', 'bg-slate-900/80 text-slate-400 hover:text-white': voucherFilter !== 'ALL' }" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-800">
+          Tất Cả (<span x-text="vouchers.length"></span>)
+        </button>
+        <button @click="voucherFilter = 'Shopee Video'" :class="{ 'bg-indigo-600 text-white': voucherFilter === 'Shopee Video', 'bg-slate-900/80 text-slate-400 hover:text-white': voucherFilter !== 'Shopee Video' }" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-800">
+          🎬 Shopee Video (20%-50%)
+        </button>
+        <button @click="voucherFilter = 'Shopee Live'" :class="{ 'bg-indigo-600 text-white': voucherFilter === 'Shopee Live', 'bg-slate-900/80 text-slate-400 hover:text-white': voucherFilter !== 'Shopee Live' }" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-800">
+          🔴 Shopee Live
+        </button>
+        <button @click="voucherFilter = 'Mã Toàn Sàn'" :class="{ 'bg-indigo-600 text-white': voucherFilter === 'Mã Toàn Sàn', 'bg-slate-900/80 text-slate-400 hover:text-white': voucherFilter !== 'Mã Toàn Sàn' }" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-800">
+          ⚡️ Khung Giờ Toàn Sàn
+        </button>
+        <button @click="voucherFilter = 'Freeship'" :class="{ 'bg-indigo-600 text-white': voucherFilter === 'Freeship', 'bg-slate-900/80 text-slate-400 hover:text-white': voucherFilter !== 'Freeship' }" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-800">
+          🚚 Freeship Xtra
+        </button>
+        <button @click="voucherFilter = 'Điện Tử - Công Nghệ'" :class="{ 'bg-indigo-600 text-white': voucherFilter === 'Điện Tử - Công Nghệ', 'bg-slate-900/80 text-slate-400 hover:text-white': voucherFilter !== 'Điện Tử - Công Nghệ' }" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-800">
+          💻 Điện Tử Công Nghệ
+        </button>
+        <button @click="voucherFilter = 'Hoàn Xu Xtra'" :class="{ 'bg-indigo-600 text-white': voucherFilter === 'Hoàn Xu Xtra', 'bg-slate-900/80 text-slate-400 hover:text-white': voucherFilter !== 'Hoàn Xu Xtra' }" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition border border-slate-800">
+          🪙 Hoàn Xu Xtra
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <template x-for="v in filteredVouchers" :key="v.voucher_id">
+          <div class="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 flex flex-col justify-between shadow-sm hover:border-slate-700 transition space-y-4">
             <div>
-              <div class="flex items-center space-x-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" x-text="v.voucher_type"></span>
-                <span class="text-xs font-mono font-bold text-white" x-text="v.voucher_code"></span>
+              <div class="flex items-center justify-between">
+                <span class="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" x-text="v.category || v.voucher_type"></span>
+                <span class="text-xs font-mono font-bold text-amber-400" x-text="v.voucher_code"></span>
               </div>
-              <p class="text-sm font-semibold text-slate-200 mt-1.5" x-text="v.label"></p>
-              <p class="text-xs text-slate-400 mt-0.5">Đơn tối thiểu: <span x-text="formatMoney(v.min_spend)"></span></p>
+              <p class="text-base font-bold text-white mt-2.5" x-text="v.label"></p>
+              <p class="text-xs text-slate-400 mt-1">Đơn tối thiểu: <span class="font-semibold text-slate-200" x-text="formatMoney(v.min_spend)"></span></p>
+              <div class="mt-3 p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 text-[11px] text-slate-300 leading-relaxed">
+                <p class="font-semibold text-indigo-400 mb-1"><i class="fa-solid fa-circle-info mr-1"></i>Hướng dẫn sử dụng:</p>
+                <p class="whitespace-pre-line" x-text="v.guide || 'Lưu mã tại trang khuyến mãi và áp mã khi thanh toán.'"></p>
+              </div>
             </div>
-            <a href="https://shopee.vn/m/ma-giam-gia" target="_blank" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg text-slate-300 transition flex-shrink-0">
-              Lưu Mã
+            <a :href="v.claim_url || 'https://shopee.vn/m/ma-giam-gia'" target="_blank" class="w-full text-center py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-xs font-bold rounded-xl text-white shadow-md transition flex items-center justify-center space-x-2">
+              <i class="fa-solid fa-gift"></i>
+              <span>Nhận Mã Ngay Trên Shopee</span>
             </a>
           </div>
         </template>
@@ -224,8 +254,13 @@
     function dashboardApp() {
       return {
         currentTab: 'watchlist',
+        voucherFilter: 'ALL',
         products: [],
         vouchers: [],
+        get filteredVouchers() {
+          if (this.voucherFilter === 'ALL') return this.vouchers;
+          return this.vouchers.filter(v => (v.category === this.voucherFilter || v.voucher_type === this.voucherFilter));
+        },
         stats: { total_products: 0, ready_deals: 0, active_vouchers: 0, total_alerts: 0 },
         newUrl: '',
         newTargetMode: 'PERCENT',

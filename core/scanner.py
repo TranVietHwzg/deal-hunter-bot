@@ -1,16 +1,14 @@
 import asyncio
 from datetime import datetime
 from core import database, calculator
-from scrapers import shopee
+from scrapers import shopee, voucher_hunter
 
 async def seed_default_vouchers():
-    """Nạp sẵn các voucher sàn xịn nếu kho voucher đang trống"""
-    vouchers = database.get_all_vouchers(only_active=True)
-    if not vouchers:
-        default_vouchers = shopee.get_default_high_tier_vouchers()
-        for v in default_vouchers:
-            database.upsert_voucher(v)
-        print("[Scanner] Đã nạp sẵn 4 mã voucher sàn & video xịn vào hệ thống.")
+    """Nạp và đồng bộ kho voucher Shopee phong phú (Video, Live, Toàn sàn, Freeship, Điện tử, Hoàn xu)"""
+    comprehensive_vouchers = voucher_hunter.get_comprehensive_voucher_catalog()
+    for v in comprehensive_vouchers:
+        database.upsert_voucher(v)
+    print(f"[Scanner] Đã đồng bộ {len(comprehensive_vouchers)} voucher Shopee xịn kèm link nhận và hướng dẫn.")
 
 async def run_scan_cycle(bot_instance=None):
     """Quét 1 chu kỳ đối soát giá toàn bộ sản phẩm và kho voucher"""

@@ -54,18 +54,28 @@ def init_db():
         voucher_id TEXT UNIQUE,
         platform TEXT DEFAULT 'SHOPEE',
         voucher_code TEXT,
-        voucher_type TEXT,              -- 'SHOP', 'PLATFORM', 'FREESHIP', 'LIVE_VIDEO'
+        voucher_type TEXT,              -- 'SHOP', 'PLATFORM', 'FREESHIP', 'LIVE_VIDEO', 'VIDEO', 'LIVE', 'CATEGORY', 'CASHBACK'
+        category TEXT,                  -- 'Shopee Video', 'Shopee Live', 'Mã Toàn Sàn', 'Freeship'...
         discount_type TEXT,             -- 'FIXED' hoặc 'PERCENT'
         discount_val REAL,              -- Ví dụ: 50000 hoặc 15
         max_discount REAL,              -- Mức giảm tối đa
         min_spend REAL,                 -- Đơn tối thiểu
         shop_id TEXT,
         label TEXT,                     -- Tên hiển thị (VD: Giảm 50k đơn từ 300k)
+        claim_url TEXT,                 -- Link trực tiếp để bấm vào lưu mã
+        guide TEXT,                     -- Hướng dẫn chi tiết cách áp mã
         is_high_tier INTEGER DEFAULT 1, -- 1 nếu là voucher xịn (>=50k hoặc >=15%)
         is_active INTEGER DEFAULT 1,
         expired_at TEXT
     );
     """)
+
+    # Tự động nâng cấp cột nếu database đã tồn tại từ trước
+    for col, col_type in [("category", "TEXT"), ("claim_url", "TEXT"), ("guide", "TEXT")]:
+        try:
+            cursor.execute(f"ALTER TABLE vouchers ADD COLUMN {col} {col_type}")
+        except Exception:
+            pass
 
     # 4. Bảng lưu vết cảnh báo đã gửi (chống spam)
     cursor.execute("""
@@ -140,16 +150,20 @@ def update_product_evaluation(item_id, current_price, final_price, discount_pct,
     conn.commit()
     conn.close()
 
-def get_all_vouchers(only_active=True, only_high_tier=False):
+def get_all_vouchers(only_active=True, only_high_tier=False, category=None):
     conn = get_connection()
     cursor = conn.cursor()
     query = "SELECT * FROM vouchers WHERE 1=1"
+    params = []
     if only_active:
         query += " AND is_active = 1"
     if only_high_tier:
         query += " AND is_high_tier = 1"
+    if category:
+        query += " AND (category = ? OR voucher_type = ?)"
+        params.extend([category, category])
     query += " ORDER BY is_high_tier DESC, discount_val DESC"
-    cursor.execute(query)
+    cursor.execute(query, params)
     rows = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return rows
@@ -158,17 +172,23 @@ def upsert_voucher(v_data):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO vouchers (voucher_id, platform, voucher_code, voucher_type, discount_type, discount_val, max_discount, min_spend, shop_id, label, is_high_tier, is_active, expired_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO vouchers (voucher_id, platform, voucher_code, voucher_type, category, discount_type, discount_val, max_discount, min_spend, shop_id, label, claim_url, guide, is_high_tier, is_active, expired_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(voucher_id) DO UPDATE SET
         is_active = excluded.is_active,
         discount_val = excluded.discount_val,
+        category = excluded.category,
+        claim_url = excluded.claim_url,
+        guide = excluded.guide,
         expired_at = excluded.expired_at
     """, (
         v_data["voucher_id"], v_data.get("platform", "SHOPEE"), v_data.get("voucher_code", ""),
-        v_data.get("voucher_type", "PLATFORM"), v_data.get("discount_type", "PERCENT"),
-        v_data.get("discount_val", 0), v_data.get("max_discount", 0), v_data.get("min_spend", 0),
+        v_data.get("voucher_type", "PLATFORM"), v_data.get("category", "Mã Toàn Sàn"),
+        v_data.get("discount_type", "PERCENT"), v_data.get("discount_val", 0),
+        v_data.get("max_discount", 0), v_data.get("min_spend", 0),
         v_data.get("shop_id", None), v_data.get("label", ""),
+        v_data.get("claim_url", "https://shopee.vn/m/ma-giam-gia"),
+        v_data.get("guide", "Lưu mã tại trang khuyến mãi và áp mã khi thanh toán."),
         1 if v_data.get("is_high_tier", True) else 0,
         1 if v_data.get("is_active", True) else 0,
         v_data.get("expired_at", "")

@@ -158,12 +158,68 @@ class TelegramDealBot:
             await self.send_message(text, reply_markup={"inline_keyboard": keyboard_rows})
 
         elif data == "menu_vouchers":
-            vouchers = database.get_all_vouchers(only_active=True, only_high_tier=True)
-            text = "🎟 <b>KHO VOUCHER XỊN ĐANG HOẠT ĐỘNG:</b>\n\n"
-            for v in vouchers:
-                text += f"• <b>[{v['voucher_type']}]</b> {v['label']}\n  Code: <code>{v['voucher_code']}</code>\n\n"
-            kb = {"inline_keyboard": [[{"text": "⬅️ Quay Lại Menu", "callback_data": "menu_main"}]]}
+            text = (
+                "🎟 <b>TRẠM VOUCHER SHOPEE XỊN - CHỌN DANH MỤC:</b>\n\n"
+                "• 🎬 <b>Shopee Video:</b> Giảm sâu nhất hiện nay (20% - 50%)\n"
+                "• 🔴 <b>Shopee Live:</b> Giảm 15% - 20% khi mua qua livestream\n"
+                "• ⚡️ <b>Khung Giờ Toàn Sàn:</b> Săn lúc 0h, 9h, 12h, 21h\n"
+                "• 🚚 <b>Freeship Xtra:</b> Giảm phí ship từ 0đ đến 70.000đ\n"
+                "• 💻 <b>Điện Tử - Công Nghệ:</b> Giảm từ 300k đến 1 triệu\n\n"
+                "<i>Chọn danh mục bên dưới để lấy link nhận mã & hướng dẫn áp dụng:</i>"
+            )
+            kb = {
+                "inline_keyboard": [
+                    [
+                        {"text": "🎬 Shopee Video (20% - 50%)", "callback_data": "vcat_VIDEO"},
+                        {"text": "🔴 Shopee Live (15% - 20%)", "callback_data": "vcat_LIVE"}
+                    ],
+                    [
+                        {"text": "⚡️ Khung Giờ Toàn Sàn", "callback_data": "vcat_PLATFORM"},
+                        {"text": "🚚 Freeship Xtra (0đ - 70k)", "callback_data": "vcat_FREESHIP"}
+                    ],
+                    [
+                        {"text": "💻 Điện Tử - Công Nghệ", "callback_data": "vcat_CATEGORY"},
+                        {"text": "🪙 Hoàn Xu Xtra", "callback_data": "vcat_CASHBACK"}
+                    ],
+                    [
+                        {"text": "🌟 Xem Tất Cả Các Mã", "callback_data": "vcat_ALL"},
+                        {"text": "⬅️ Quay Lại Menu", "callback_data": "menu_main"}
+                    ]
+                ]
+            }
             await self.send_message(text, reply_markup=kb)
+
+        elif data.startswith("vcat_"):
+            cat_type = data.replace("vcat_", "")
+            if cat_type == "ALL":
+                vouchers = database.get_all_vouchers(only_active=True)
+                title = "🌟 <b>TẤT CẢ VOUCHER SHOPEE ĐANG HOẠT ĐỘNG:</b>"
+            else:
+                vouchers = database.get_all_vouchers(only_active=True, category=cat_type)
+                title = f"🎟 <b>DANH SÁCH VOUCHER [{cat_type}]:</b>"
+
+            if not vouchers:
+                text = f"{title}\n\n<i>Hiện chưa có mã nào trong danh mục này.</i>"
+                kb = {"inline_keyboard": [[{"text": "⬅️ Chọn Danh Mục Khác", "callback_data": "menu_vouchers"}]]}
+                await self.send_message(text, reply_markup=kb)
+                return
+
+            text = f"{title}\n\n"
+            keyboard_rows = []
+            for i, v in enumerate(vouchers[:6], 1):
+                claim_link = v.get("claim_url") or "https://shopee.vn/m/ma-giam-gia"
+                text += (
+                    f"<b>{i}. {v['label']}</b>\n"
+                    f"  • Đơn tối thiểu: <b>{int(v.get('min_spend', 0)):,}đ</b>\n"
+                    f"  • <i>Hướng dẫn:</i> {v.get('guide', 'Lưu tại trang khuyến mãi.')}\n\n"
+                )
+                keyboard_rows.append([{"text": f"🎁 Bấm Lưu Mã #{i} Trên App Shopee", "url": claim_link}])
+
+            keyboard_rows.append([
+                {"text": "⬅️ Chọn Danh Mục Khác", "callback_data": "menu_vouchers"},
+                {"text": "📋 Menu Chính", "callback_data": "menu_main"}
+            ])
+            await self.send_message(text, reply_markup={"inline_keyboard": keyboard_rows})
 
         elif data == "menu_check":
             await self.send_message("⚡️ <i>Đang kích hoạt quét toàn bộ sản phẩm và đối soát voucher...</i>")

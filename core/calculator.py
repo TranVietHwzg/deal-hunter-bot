@@ -32,7 +32,7 @@ def stack_vouchers_and_evaluate(product, available_vouchers, min_discount_thresh
     
     # 1. Phân loại voucher
     shop_vouchers = [v for v in available_vouchers if v.get("voucher_type") == "SHOP" and str(v.get("shop_id", "")) == shop_id and v.get("is_active", 1) == 1]
-    platform_vouchers = [v for v in available_vouchers if v.get("voucher_type") in ("PLATFORM", "LIVE_VIDEO") and v.get("is_active", 1) == 1]
+    platform_vouchers = [v for v in available_vouchers if v.get("voucher_type") in ("PLATFORM", "LIVE_VIDEO", "VIDEO", "LIVE", "CATEGORY", "CASHBACK") and v.get("is_active", 1) == 1]
     freeship_vouchers = [v for v in available_vouchers if v.get("voucher_type") == "FREESHIP" and v.get("is_active", 1) == 1]
     
     # Ưu tiên voucher xịn (giảm nhiều nhất)
@@ -55,7 +55,7 @@ def stack_vouchers_and_evaluate(product, available_vouchers, min_discount_thresh
 
     price_after_shop = max(0, current_price - best_shop_disc)
 
-    # Tầng 2: Áp mã Sàn / Live Video (trên giá trị sau khi trừ mã shop)
+    # Tầng 2: Áp mã Sàn / Video / Live (trên giá trị sau khi trừ mã shop)
     best_plat_voucher = None
     best_plat_disc = 0
     for v in platform_vouchers:
@@ -65,11 +65,12 @@ def stack_vouchers_and_evaluate(product, available_vouchers, min_discount_thresh
             best_plat_voucher = v
             
     if best_plat_voucher and best_plat_disc > 0:
+        v_type_label = best_plat_voucher.get("category") or "Mã Sàn"
         applied_vouchers.append({
             "code": best_plat_voucher.get("voucher_code", "MÃ SÀN"),
             "label": best_plat_voucher.get("label", f"Giảm {int(best_plat_disc):,}đ"),
             "discount": best_plat_disc,
-            "type": "Mã Sàn"
+            "type": v_type_label
         })
 
     price_after_plat = max(0, price_after_shop - best_plat_disc)
