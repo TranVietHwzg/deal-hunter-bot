@@ -23,10 +23,24 @@ async def seed_default_vouchers():
 async def run_scan_cycle(bot_instance=None):
     """Quét 1 chu kỳ đối soát giá toàn bộ sản phẩm và kho voucher"""
     await seed_default_vouchers()
-    products = database.get_all_products()
     vouchers = database.get_vouchers(min_score=60)
     
+    # 1. TỰ ĐỘNG BẮN CẢNH BÁO VOUCHER XỊN / HOT (KHÔNG CẦN ẤN THỦ CÔNG)
+    if bot_instance:
+        hot_vouchers = database.get_vouchers(min_score=75)
+        for hv in hot_vouchers:
+            # broadcast_hot_alert có SHA-256 deduplication, chỉ bắn 1 lần cho voucher mới
+            await bot_instance.broadcast_hot_alert(hv)
+
+        # Kiểm tra mã hồi sinh (Restock)
+        for v in vouchers:
+            r_event = restock_radar.update_and_detect_restock(v.get("id"), v.get("status"), v.get("quality_score", 0))
+            if r_event and r_event.get("is_urgent_alert"):
+                from app.bot.templates import format_restock_alert
+                await bot_instance.send_message(format_restock_alert(v))
+
     ready_count = 0
+    products = database.get_all_products()
     for p in products:
         try:
             shop_id = p.get("shop_id")

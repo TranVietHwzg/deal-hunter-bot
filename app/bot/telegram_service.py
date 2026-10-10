@@ -12,7 +12,7 @@ from app.core.scoring_engine import calculate_voucher_quality_score
 from app.core.stacking_engine import calculate_stacked_price
 from app.core.junk_filter import is_freeship, validate_voucher
 from app.bot.templates import format_hot_voucher_alert, format_restock_alert
-from core import database
+from core import database, calculator
 from app.connectors.shopee_connector import ShopeeConnector
 
 class TelegramBotService:
@@ -60,8 +60,19 @@ class TelegramBotService:
             except Exception:
                 return await self.send_message(caption, reply_markup=reply_markup, parse_mode=parse_mode)
 
+    async def answer_callback(self, callback_query_id: str, text: Optional[str] = None) -> None:
+        """Phản hồi callback query để tắt biểu tượng đồng hồ quay trên Telegram"""
+        try:
+            payload = {"callback_query_id": callback_query_id}
+            if text:
+                payload["text"] = text
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(f"{self.api_url}/answerCallbackQuery", json=payload)
+        except Exception:
+            pass
+
     async def broadcast_hot_alert(self, voucher: Dict[str, Any], example_product: Optional[Dict[str, Any]] = None) -> bool:
-        """Gửi cảnh báo Hot Voucher với cơ chế SHA-256 Deduplication chống spam"""
+        """Gửi cảnh báo Hot Voucher tự động với cơ chế SHA-256 Deduplication chống spam"""
         user_cfg = database.get_user_settings()
         if user_cfg.get("is_muted") == 1:
             return False
@@ -82,15 +93,27 @@ class TelegramBotService:
         hash_input = f"HOT_{v_id}_{voucher.get('discount_value')}_{voucher.get('min_spend')}"
         dedup_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
-        # Kiểm tra trùng
+        # Kiểm tra trùng trong database
         if database.is_alert_duplicate(dedup_hash):
             return False
 
         msg = format_hot_voucher_alert(voucher, example_product)
+        claim_url = voucher.get("claim_url", "https://shopee.vn")
+
+        # Nút bấm gọn gàng, sắp xếp khoa học theo dạng lưới 2 cột
         buttons = {
             "inline_keyboard": [
-                [{"text": "🎫 LẤY VOUCHER NGAY", "url": voucher.get("claim_url", "https://shopee.vn")}],
-                [{"text": "🔍 Tại sao mã này xịn? (/why)", "callback_data": f"why_{v_id}"}]
+                [
+                    {"text": "🎫 LƯU MÃ TRÊN SHOPEE", "url": claim_url}
+                ],
+                [
+                    {"text": "🔍 Bảng Điểm (/why)", "callback_data": f"why_{v_id}"},
+                    {"text": "⚡️ Quét Thử Deal", "callback_data": "menu_check"}
+                ],
+                [
+                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
+                    {"text": "🏠 Menu Chính", "callback_data": "menu_home"}
+                ]
             ]
         }
 
@@ -106,23 +129,218 @@ class TelegramBotService:
             return True
         return False
 
-    # ----------------- XỬ LÝ 13 CÂU LỆNH BOT -----------------
+    async def send_deal_alert(self, product: Dict[str, Any], evaluation: Dict[str, Any], alert_reason: str = "DEAL_MOI") -> None:
+        """Gửi thông báo khi món hàng đạt ngưỡng giá mục tiêu"""
+        tier = evaluation.get("tier_label", "🔥 SIÊU DEAL GIÁ TỐT")
+        prefix = "🚨 [GIÁ MỚI TỐT HƠN]" if alert_reason == "GIA_TOT_HON" else tier
+
+        vouchers_text = ""
+        for v in evaluation.get("applied_vouchers", []):
+            vouchers_text += f"  • <b>{v.get('type')}</b>: {v.get('label')}\n"
+
+        if not vouchers_text:
+            vouchers_text = "  • <i>(Không cần mã, shop đang giảm trực tiếp)</i>\n"
+
+        target_str = f"≥ {product.get('target_value')}%" if str(product.get('target_mode')).upper() == 'PERCENT' else f"≤ {int(product.get('target_value', 0)):,}đ"
+        item_id = product.get("item_id_on_platform") or product.get("item_id")
+        p_url = product.get("product_url") or f"https://shopee.vn/product/{product.get('shop_id', '0')}/{item_id}"
+
+        msg = (
+            f"<b>{prefix}</b>\n\n"
+            f"📦 <b>Sản phẩm:</b> {product.get('name')}\n"
+            f"📊 <b>Giá niêm yết:</b> <s>{int(evaluation.get('baseline_price', 0)):,}đ</s>\n"
+            f"💥 <b>GIÁ THỰC TRẢ SAU MÃ:</b> <b><u>{int(evaluation.get('final_price', 0)):,}đ</u></b>\n"
+            f"📉 <b>Mức giảm thật:</b> <b>-{evaluation.get('discount_percent')}%</b> (Tiết kiệm {int(evaluation.get('savings', 0)):,}đ)\n"
+            f"🎯 <b>Mục tiêu của bạn:</b> {target_str}\n\n"
+            f"🎫 <b>CÁC VOUCHER ĐANG ÁP DỤNG:</b>\n"
+            f"{vouchers_text}\n"
+            f"🛡 <b>Độ tin cậy gộp mã:</b> {evaluation.get('confidence', 'VERIFIED')}\n"
+            f"⚠️ <i>Lưu ý: Bạn vào Shopee kiểm tra lưu mã rồi đặt mua thủ công trên App.</i>"
+        )
+
+        buttons = {
+            "inline_keyboard": [
+                [
+                    {"text": "🛒 BẤM MUA NGAY TRÊN SHOPEE", "url": p_url}
+                ],
+                [
+                    {"text": "🧮 Chi Tiết Gộp Mã", "callback_data": f"stack_{item_id}"},
+                    {"text": "📈 Lịch Sử Giá", "callback_data": f"history_{item_id}"}
+                ],
+                [
+                    {"text": "📋 Watchlist", "callback_data": "menu_list"},
+                    {"text": "⚡️ Quét Lại", "callback_data": "menu_check"}
+                ]
+            ]
+        }
+
+        img = product.get("image_url") or "https://deo.shopeemobile.com/shopee/shopee-pcmall-live-sg/assets/icon_favicon_1_32.png"
+        await self.send_photo(img, msg, reply_markup=buttons)
+
+    # ----------------- NHẬN DIỆN & THÊM LINK TRỰC TIẾP -----------------
+
+    async def handle_direct_link(self, text: str) -> bool:
+        """
+        Tự động nhận diện khi người dùng dán link Shopee vào khung chat (kể cả không gõ lệnh /watch)
+        Ví dụ:
+        - https://shopee.vn/product/88888/12345678
+        - https://vn.shp.ee/abcxyz 35%
+        - https://shopee.vn/... 450k
+        """
+        match = re.search(r'(https?://[^\s]+)', text)
+        if not match:
+            return False
+
+        raw_url = match.group(1)
+        if "shopee.vn" not in raw_url and "shp.ee" not in raw_url:
+            return False
+
+        # Phân tích shop_id và item_id (tự động unshorten link rút gọn)
+        parsed = await self.shopee_connector.resolve_url_and_parse(raw_url)
+        item_id = parsed.get("item_id")
+        shop_id = parsed.get("shop_id")
+
+        if not item_id:
+            await self.send_message("❌ Không nhận diện được mã sản phẩm từ link Shopee này. Vui lòng kiểm tra lại link.")
+            return True
+
+        # Trích xuất mục tiêu giá nếu có kèm theo trong tin nhắn
+        remainder = text.replace(raw_url, "").strip()
+        target_val = 30.0 # Mặc định giảm 30%
+        target_mode = "PERCENT"
+
+        if remainder:
+            clean_rem = remainder.lower().replace(",", "").replace(".", "").replace("đ", "")
+            if "%" in clean_rem:
+                try:
+                    pct = float(re.findall(r'\d+', clean_rem)[0])
+                    target_mode = "PERCENT"
+                    target_val = pct
+                except Exception:
+                    pass
+            elif "k" in clean_rem:
+                try:
+                    val_k = float(re.findall(r'\d+', clean_rem)[0]) * 1000
+                    target_mode = "PRICE"
+                    target_val = val_k
+                except Exception:
+                    pass
+            else:
+                digits = re.findall(r'\d+', clean_rem)
+                if digits:
+                    val_num = float(digits[0])
+                    if val_num <= 100:
+                        target_mode = "PERCENT"
+                        target_val = val_num
+                    else:
+                        target_mode = "PRICE"
+                        target_val = val_num
+
+        # Lấy thông tin chi tiết từ Shopee
+        details = await self.shopee_connector.fetch_product_details(item_id, shop_id)
+        name = details.get("name", f"Sản phẩm {item_id}")
+        base_price = details.get("original_price") or details.get("current_price", 500000.0)
+
+        # Lưu vào Database
+        database.add_product(
+            item_id=item_id,
+            shop_id=shop_id,
+            name=name,
+            url=raw_url,
+            image_url=details.get("image_url"),
+            target_mode=target_mode,
+            target_value=target_val,
+            baseline_price=base_price
+        )
+
+        # Tính toán giá gộp thử ngay lập tức
+        vouchers = database.get_vouchers(min_score=60)
+        p_obj = database.get_product_by_id(item_id)
+        eval_res = calculator.stack_vouchers_and_evaluate(p_obj, vouchers)
+        database.update_product_evaluation(
+            item_id=item_id,
+            current_price=eval_res["current_price"],
+            final_price=eval_res["final_price"],
+            discount_percent=eval_res["discount_percent"],
+            is_deal_ready=1 if eval_res["is_deal_ready"] else 0,
+            applied_vouchers=eval_res["applied_vouchers"]
+        )
+
+        target_str = f"giảm ≥ {target_val}%" if target_mode == "PERCENT" else f"giá ≤ {int(target_val):,}đ"
+        ready_icon = "🔥 ĐÃ ĐẠT GIÁ MUA!" if eval_res["is_deal_ready"] else "⏳ Đang theo dõi"
+
+        msg = (
+            f"✅ <b>ĐÃ THÊM SẢN PHẨM VÀO WATCHLIST!</b>\n\n"
+            f"📦 <b>{name}</b>\n"
+            f"💵 <b>Giá niêm yết:</b> <s>{int(base_price):,}đ</s>\n"
+            f"💥 <b>Giá sau gộp mã hiện tại:</b> <b><u>{int(eval_res['final_price']):,}đ</u></b> (-{eval_res['discount_percent']}%)\n"
+            f"🎯 <b>Mục tiêu canh mua:</b> <b>{target_str}</b>\n"
+            f"📊 <b>Trạng thái:</b> {ready_icon}\n\n"
+            f"💡 <i>Bạn có thể đổi nhanh mục tiêu giảm bằng các nút bên dưới:</i>"
+        )
+
+        # Nút bấm gọn gàng, bố cục 2–3 cột tiện dụng
+        buttons = {
+            "inline_keyboard": [
+                [
+                    {"text": "🎯 Canh Giảm 20%", "callback_data": f"target_{item_id}_20"},
+                    {"text": "🎯 Canh Giảm 30%", "callback_data": f"target_{item_id}_30"},
+                    {"text": "🎯 Canh Giảm 40%", "callback_data": f"target_{item_id}_40"}
+                ],
+                [
+                    {"text": "🛒 Xem Trên Shopee", "url": details.get("product_url", raw_url)},
+                    {"text": "🧮 Thử Gộp Mã Ngay", "callback_data": f"stack_{item_id}"}
+                ],
+                [
+                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
+                    {"text": "❌ Hủy Canh Món Này", "callback_data": f"del_{item_id}"}
+                ]
+            ]
+        }
+
+        img = details.get("image_url")
+        if img:
+            await self.send_photo(img, msg, reply_markup=buttons)
+        else:
+            await self.send_message(msg, reply_markup=buttons)
+
+        return True
+
+    # ----------------- XỬ LÝ LỆNH & MENU TƯƠNG TÁC -----------------
 
     async def handle_command(self, text: str, user_chat_id: str) -> None:
-        parts = text.strip().split()
-        if not parts:
+        clean_text = text.strip()
+        if not clean_text:
             return
-        cmd = parts[0].lower().split("@")[0] # Bỏ @bot_name nếu có
+
+        # 1. Kiểm tra dán link Shopee trực tiếp
+        if "shopee.vn" in clean_text or "shp.ee" in clean_text:
+            if not clean_text.startswith("/"):
+                handled = await self.handle_direct_link(clean_text)
+                if handled:
+                    return
+
+        parts = clean_text.split()
+        cmd = parts[0].lower().split("@")[0]
         args = parts[1:]
 
         if cmd in ["/start", "/help", "/menu"]:
             await self._cmd_help()
-        elif cmd == "/vouchers":
+        elif cmd in ["/vouchers", "/voucher"]:
             await self._cmd_vouchers(min_score=70)
-        elif cmd == "/hot":
+        elif cmd in ["/hot", "/sieu_voucher"]:
             await self._cmd_vouchers(min_score=85, hot_only=True)
-        elif cmd == "/watch":
-            await self._cmd_watch(args)
+        elif cmd in ["/watch", "/add", "/them"]:
+            if args:
+                await self.handle_direct_link(" ".join(args))
+            else:
+                await self._cmd_add_guide()
+        elif cmd in ["/list", "/watchlist", "/ds"]:
+            await self._cmd_list_watchlist()
+        elif cmd in ["/del", "/xoa"]:
+            await self._cmd_del(args)
+        elif cmd in ["/check", "/scan", "/quet"]:
+            await self._cmd_scan_now()
         elif cmd == "/keyword":
             await self._cmd_keyword(args)
         elif cmd == "/category":
@@ -148,28 +366,139 @@ class TelegramBotService:
         elif cmd == "/settings":
             await self._cmd_settings()
         else:
-            await self.send_message(f"❓ Không rõ lệnh <code>{cmd}</code>. Gõ /help để xem danh sách 13 lệnh hệ thống.")
+            await self.send_message(f"❓ Không rõ lệnh <code>{cmd}</code>. Gõ /menu để mở bảng điều khiển.")
 
     async def _cmd_help(self):
         msg = (
-            "🤖 <b>HỆ THỐNG VOUCHER INTELLIGENCE & DEAL OPTIMIZER</b>\n"
-            "<i>(Phiên bản Production chuyên săn mã xịn - Bài trừ 100% Freeship)</i>\n\n"
-            "📋 <b>DANH SÁCH 13 CÂU LỆNH:</b>\n"
-            "• /vouchers — Kho voucher chất lượng cao đang còn lượt (Score ≥ 70)\n"
-            "• /hot — Siêu voucher điểm vàng (Score ≥ 85)\n"
-            "• /watch &lt;link_shopee&gt; &lt;giá_mục_tiêu&gt; — Canh giảm giá 1 sản phẩm\n"
-            "• /keyword &lt;từ_khóa&gt; &lt;giá_mục_tiêu&gt; — Canh deal theo từ khóa\n"
-            "• /category &lt;ngành_hàng&gt; — Cài đặt ngành hàng ưu tiên\n"
-            "• /minsave &lt;số_tiền&gt; — Đặt mức giảm tối thiểu mới báo (Mặc định 50k)\n"
-            "• /newuser on|off — Bật/tắt voucher chỉ dành cho tân thủ\n"
-            "• /platform shopee|lazada|tiktok|all — Chọn sàn theo dõi\n"
-            "• /mute & /unmute — Tắt/Bật thông báo khẩn\n"
-            "• /why &lt;voucher_id&gt; — Giải mã chi tiết lý do & bảng điểm 0–100\n"
-            "• /stack &lt;link_sản_phẩm&gt; — Mô phỏng gộp 4 tầng mã cho 1 sản phẩm\n"
-            "• /history &lt;item_id&gt; — Tra cứu biểu đồ biến động giá chống giá ảo\n"
-            "• /settings — Xem và tùy chỉnh toàn bộ cấu hình cá nhân"
+            "🤖 <b>VOUCHER INTELLIGENCE & DEAL OPTIMIZER</b>\n"
+            "<i>(Săn voucher xịn Shopee, Lazada, TikTok — Bài trừ 100% Freeship ảo)</i>\n\n"
+            "✨ <b>BẠN CÓ THỂ LÀM GÌ:</b>\n"
+            "• <b>Dán thẳng link Shopee vào đây</b> để bắt đầu canh giá tự động.\n"
+            "• Hệ thống <b>tự động bắn tin</b> khi có Voucher HOT hoặc sản phẩm đạt giá.\n"
+            "• Gộp mã đa tầng: Shop + Toàn sàn + Video/Live.\n\n"
+            "👇 <b>Bấm các nút dưới đây để thao tác nhanh:</b>"
         )
-        await self.send_message(msg)
+        buttons = self.get_main_menu_keyboard()
+        await self.send_message(msg, reply_markup=buttons)
+
+    def get_main_menu_keyboard(self):
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "🔥 Siêu Voucher HOT", "callback_data": "menu_hot"},
+                    {"text": "🎫 Kho Voucher Xịn", "callback_data": "menu_vouchers"}
+                ],
+                [
+                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
+                    {"text": "➕ Thêm Sản Phẩm", "callback_data": "menu_add_guide"}
+                ],
+                [
+                    {"text": "⚡️ Quét Deal Ngay", "callback_data": "menu_check"},
+                    {"text": "⚙️ Cài Đặt", "callback_data": "menu_settings"}
+                ]
+            ]
+        }
+
+    async def _cmd_add_guide(self):
+        msg = (
+            "➕ <b>HƯỚNG DẪN THÊM SẢN PHẨM CANH DEAL</b>\n\n"
+            "Rất đơn giản! Bạn chỉ cần <b>COPY và DÁN THẲNG LINK SHOPEE</b> vào ô chat này.\n\n"
+            "💡 <b>Các ví dụ tiện lợi:</b>\n"
+            "1. <b>Dán link trực tiếp:</b>\n"
+            "   <code>https://shopee.vn/product/88888/12345678</code>\n"
+            "   <i>(Bot tự động canh khi giảm ≥ 30%)</i>\n\n"
+            "2. <b>Dán kèm % giảm mong muốn:</b>\n"
+            "   <code>https://shopee.vn/product/88888/12345678 35%</code>\n\n"
+            "3. <b>Dán kèm mức giá kỳ vọng:</b>\n"
+            "   <code>https://shopee.vn/product/88888/12345678 450k</code>\n\n"
+            "4. <b>Hỗ trợ cả link chia sẻ ngắn từ app:</b>\n"
+            "   <code>https://vn.shp.ee/xxxxxx</code>\n\n"
+            "👉 <i>Hãy copy link món hàng bạn thích và gửi vào đây ngay bây giờ!</i>"
+        )
+        buttons = {
+            "inline_keyboard": [
+                [{"text": "📋 Xem Watchlist Hiện Tại", "callback_data": "menu_list"}],
+                [{"text": "🏠 Quay Lại Menu Chính", "callback_data": "menu_home"}]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
+
+    async def _cmd_list_watchlist(self):
+        products = database.get_all_products()
+        if not products:
+            msg = (
+                "📋 <b>WATCHLIST CỦA BẠN ĐANG TRỐNG</b>\n\n"
+                "Bạn chưa thêm sản phẩm nào. Hãy copy và dán một link Shopee vào đây để bắt đầu theo dõi!"
+            )
+            buttons = {
+                "inline_keyboard": [
+                    [{"text": "➕ Hướng Dẫn Thêm Sản Phẩm", "callback_data": "menu_add_guide"}],
+                    [{"text": "🔥 Xem Voucher HOT Đang Có", "callback_data": "menu_hot"}]
+                ]
+            }
+            await self.send_message(msg, reply_markup=buttons)
+            return
+
+        msg = f"📋 <b>DANH SÁCH SẢN PHẨM ĐANG THEO DÕI ({len(products)} món):</b>\n\n"
+        for i, p in enumerate(products, 1):
+            ready_icon = "🔥 ĐẠT GIÁ" if p.get("is_deal_ready") == 1 else "⏳ Đang canh"
+            t_str = f"≥ {p.get('target_value')}%" if str(p.get('target_mode')).upper() == 'PERCENT' else f"≤ {int(p.get('target_value', 0)):,}đ"
+            base_p = int(p.get('baseline_market_price') or p.get('baseline_price', 0))
+            cur_p = int(p.get('final_price') or p.get('current_price', 0))
+            
+            msg += (
+                f"{i}. <b>{p['name']}</b>\n"
+                f"   • Trạng thái: <b>{ready_icon}</b>\n"
+                f"   • Giá niêm yết: <s>{base_p:,}đ</s>\n"
+                f"   • Giá sau gộp mã: <b><u>{cur_p:,}đ</u></b> (-{p.get('discount_percent', 0)}%)\n"
+                f"   • Mục tiêu của bạn: {t_str}\n"
+                f"   • ID: <code>{p.get('item_id_on_platform') or p.get('item_id')}</code>\n\n"
+            )
+
+        kb_rows = []
+        for p in products[:4]:
+            i_id = p.get('item_id_on_platform') or p.get('item_id')
+            short_name = p['name'][:14] + ".." if len(p['name']) > 14 else p['name']
+            kb_rows.append([
+                {"text": f"🧮 Gộp: {short_name}", "callback_data": f"stack_{i_id}"},
+                {"text": "❌ Xóa", "callback_data": f"del_{i_id}"}
+            ])
+
+        kb_rows.append([
+            {"text": "⚡️ Quét Deal Ngay", "callback_data": "menu_check"},
+            {"text": "➕ Thêm Sản Phẩm Mới", "callback_data": "menu_add_guide"}
+        ])
+        kb_rows.append([
+            {"text": "🏠 Quay Lại Menu Chính", "callback_data": "menu_home"}
+        ])
+
+        await self.send_message(msg, reply_markup={"inline_keyboard": kb_rows})
+
+    async def _cmd_scan_now(self):
+        from core.scanner import run_scan_cycle
+        await self.send_message("⚡️ Đang quét toàn bộ kho voucher và đối soát giá các sản phẩm...")
+        ready_count = await run_scan_cycle(self)
+        stats = database.get_stats()
+        msg = (
+            f"✅ <b>ĐÃ HOÀN TẤT CHU KỲ QUÉT!</b>\n\n"
+            f"• Số sản phẩm theo dõi: <b>{stats['total_products']} món</b>\n"
+            f"• Số deal đạt mục tiêu mua: <b>{stats['ready_deals']} món</b>\n"
+            f"• Kho voucher xịn đang mở: <b>{stats['total_vouchers']} mã</b>\n"
+            f"• Siêu voucher HOT (Score ≥ 85): <b>{stats['hot_vouchers']} mã</b>\n\n"
+            f"🤖 <i>Bot sẽ tự động gửi cảnh báo khẩn khi có voucher mới hoặc món hàng đạt giá.</i>"
+        )
+        buttons = {
+            "inline_keyboard": [
+                [
+                    {"text": "🔥 Xem Voucher HOT", "callback_data": "menu_hot"},
+                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"}
+                ],
+                [
+                    {"text": "🏠 Menu Chính", "callback_data": "menu_home"}
+                ]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
 
     async def _cmd_vouchers(self, min_score: int = 70, hot_only: bool = False):
         vouchers = database.get_vouchers(min_score=min_score, hot_only=hot_only)
@@ -177,123 +506,40 @@ class TelegramBotService:
             await self.send_message("Hiện tại chưa có voucher nào đạt tiêu chí (Hệ thống đã tự động lọc sạch 100% voucher freeship và voucher rác).")
             return
 
-        header = "🔥 <b>DANH SÁCH SIÊU VOUCHER HOT (SCORE ≥ 85)</b>\n\n" if hot_only else "🎫 <b>KHO VOUCHER XỊN ĐANG HOẠT ĐỘNG (SCORE ≥ 70)</b>\n\n"
+        header = "🔥 <b>SIÊU VOUCHER HOT (SCORE ≥ 85)</b>\n\n" if hot_only else "🎫 <b>KHO VOUCHER XỊN ĐANG HOẠT ĐỘNG (SCORE ≥ 70)</b>\n\n"
         body = ""
-        for i, v in enumerate(vouchers[:10], 1):
+        kb_rows = []
+
+        for i, v in enumerate(vouchers[:6], 1):
             d_val = int(v['discount_value'])
             d_str = f"Giảm {v['discount_value']}% (Tối đa {int(v['max_discount_amount']):,}đ)" if v['discount_type'] in ['PERCENT', 'PERCENTAGE'] else f"Giảm {d_val:,}đ"
             min_sp = f"Đơn từ {int(v['min_spend']):,}đ" if v['min_spend'] > 0 else "Đơn từ 0đ"
+            v_id = v['voucher_id_on_platform']
+            
             body += (
                 f"{i}. <b>[{v['platform_id']}] {v['title']}</b>\n"
                 f"   💰 <b>{d_str}</b> | 🛒 {min_sp}\n"
-                f"   ⭐ Điểm: <b>{v['quality_score']}/100</b> | ID: <code>{v['voucher_id_on_platform']}</code>\n"
-                f"   🔗 <a href=\"{v['claim_url']}\">Bấm vào lưu mã</a>\n\n"
+                f"   ⭐ Điểm: <b>{v['quality_score']}/100</b>\n\n"
             )
-        body += "<i>Gõ <code>/why &lt;ID&gt;</code> để xem chi tiết cách tính điểm của từng mã.</i>"
-        await self.send_message(header + body)
+            short_t = v['title'][:16] + ".." if len(v['title']) > 16 else v['title']
+            kb_rows.append([
+                {"text": f"🎫 Lấy Mã: {short_t}", "url": v.get("claim_url", "https://shopee.vn")},
+                {"text": "🔍 Xem Điểm", "callback_data": f"why_{v_id}"}
+            ])
 
-    async def _cmd_watch(self, args: List[str]):
-        if len(args) < 1:
-            await self.send_message("⚠️ Cú pháp: <code>/watch &lt;link_sản_phẩm&gt; &lt;giá_mục_tiêu_hoặc_%_giảm&gt;</code>\nVí dụ: <code>/watch https://shopee.vn/product/88/123 500000</code>")
-            return
+        kb_rows.append([
+            {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
+            {"text": "⚡️ Quét Lại", "callback_data": "menu_check"}
+        ])
+        kb_rows.append([
+            {"text": "🏠 Menu Chính", "callback_data": "menu_home"}
+        ])
 
-        url = args[0]
-        parsed = self.shopee_connector.parse_shopee_url(url)
-        item_id = parsed["item_id"]
-        shop_id = parsed["shop_id"]
-
-        if not item_id:
-            await self.send_message("❌ Không nhận diện được mã sản phẩm từ link Shopee. Vui lòng kiểm tra lại link.")
-            return
-
-        target_val = 30.0 # mặc định giảm 30%
-        target_mode = "PERCENT"
-        if len(args) >= 2:
-            try:
-                val = float(args[1].replace(",", "").replace(".", "").replace("k", "000"))
-                if val <= 100:
-                    target_mode = "PERCENT"
-                    target_val = val
-                else:
-                    target_mode = "PRICE"
-                    target_val = val
-            except ValueError:
-                pass
-
-        # Lấy thông tin sản phẩm
-        details = await self.shopee_connector.fetch_product_details(item_id, shop_id)
-        name = details.get("name", f"Sản phẩm {item_id}")
-        base_price = details.get("original_price", 500000.0)
-
-        database.add_product(
-            item_id=item_id,
-            shop_id=shop_id,
-            name=name,
-            url=url,
-            image_url=details.get("image_url"),
-            target_mode=target_mode,
-            target_value=target_val,
-            baseline_price=base_price
-        )
-
-        target_str = f"giảm ≥ {target_val}%" if target_mode == "PERCENT" else f"giá ≤ {int(target_val):,}đ"
-        await self.send_message(
-            f"✅ <b>ĐÃ THÊM VÀO WATCHLIST!</b>\n\n"
-            f"📦 <b>Sản phẩm:</b> {name}\n"
-            f"📊 <b>Giá niêm yết:</b> {int(details.get('current_price', base_price)):,}đ\n"
-            f"🎯 <b>Mục tiêu canh mua:</b> {target_str}\n"
-            f"🤖 Hệ thống sẽ tự động gộp các mã sàn/shop/ngành hàng và báo ngay khi đạt giá mục tiêu!"
-        )
-
-    async def _cmd_keyword(self, args: List[str]):
-        if not args:
-            await self.send_message("⚠️ Cú pháp: <code>/keyword &lt;từ_khóa&gt; &lt;giá_mục_tiêu&gt;</code>\nVí dụ: <code>/keyword chuột Dareu 300000</code>")
-            return
-        kw = " ".join(args[:-1]) if len(args) > 1 and args[-1].replace(".","").isdigit() else " ".join(args)
-        await self.send_message(f"🔍 Đã lưu từ khóa theo dõi: <b>{kw}</b>. Khi có voucher giảm sâu áp dụng cho nhóm này, bot sẽ gửi cảnh báo!")
-
-    async def _cmd_category(self, args: List[str]):
-        if not args:
-            await self.send_message("⚠️ Cú pháp: <code>/category &lt;tên_ngành_hàng&gt;</code>\nVí dụ: <code>/category Điện Tử</code>")
-            return
-        cat = " ".join(args)
-        await self.send_message(f"🏷 Đã đặt ngành hàng ưu tiên: <b>{cat}</b>. Các voucher thuộc ngành này sẽ được cộng thêm 3–5 điểm ưu tiên!")
-
-    async def _cmd_minsave(self, args: List[str]):
-        if not args:
-            await self.send_message("⚠️ Cú pháp: <code>/minsave &lt;số_tiền_tiết_kiệm_tối_thiểu&gt;</code>\nVí dụ: <code>/minsave 100000</code>")
-            return
-        try:
-            val = float(args[0].replace(",", "").replace(".", "").replace("k", "000"))
-            database.update_user_settings("min_save_amount", val)
-            await self.send_message(f"💰 Đã cập nhật mức tiết kiệm tối thiểu: <b>{int(val):,}đ</b>. Bot chỉ báo deal tiết kiệm từ {int(val):,}đ trở lên.")
-        except ValueError:
-            await self.send_message("❌ Số tiền không hợp lệ.")
-
-    async def _cmd_newuser(self, args: List[str]):
-        if not args or args[0].lower() not in ["on", "off"]:
-            await self.send_message("⚠️ Cú pháp: <code>/newuser on</code> hoặc <code>/newuser off</code>")
-            return
-        val = 1 if args[0].lower() == "on" else 0
-        database.update_user_settings("allow_new_user_vouchers", val)
-        status_str = "CHO PHÉP" if val == 1 else "CẤM (BỎ QUA)"
-        await self.send_message(f"👤 Cài đặt mã tân thủ: <b>{status_str}</b>.")
-
-    async def _cmd_platform(self, args: List[str]):
-        if not args:
-            await self.send_message("⚠️ Cú pháp: <code>/platform shopee|lazada|tiktok|all</code>")
-            return
-        target = args[0].upper()
-        if target == "ALL":
-            plats = ["SHOPEE", "LAZADA", "TIKTOK"]
-        else:
-            plats = [target]
-        database.update_user_settings("active_platforms", json.dumps(plats))
-        await self.send_message(f"🌐 Nền tảng đang theo dõi: <b>{', '.join(plats)}</b>")
+        await self.send_message(header + body, reply_markup={"inline_keyboard": kb_rows})
 
     async def _cmd_why(self, args: List[str]):
         if not args:
-            await self.send_message("⚠️ Cú pháp: <code>/why &lt;voucher_id&gt;</code>\nVí dụ: <code>/why SP_TECH_500K_2M</code>")
+            await self.send_message("⚠️ Cú pháp: <code>/why &lt;voucher_id&gt;</code>")
             return
         v_id = args[0]
         voucher = database.get_voucher_by_id(v_id)
@@ -316,22 +562,33 @@ class TelegramBotService:
         )
         if b.get("penalties", {}).get("total_deduction", 0) > 0:
             msg += f"\n⚠️ <b>Điểm trừ phạt:</b> -{b['penalties']['total_deduction']}đ ({', '.join(b['penalties']['reasons'])})"
-        await self.send_message(msg)
+
+        buttons = {
+            "inline_keyboard": [
+                [{"text": "🎫 Lưu Mã Này Ngay", "url": voucher.get("claim_url", "https://shopee.vn")}],
+                [{"text": "🔥 Xem Thêm Mã HOT", "callback_data": "menu_hot"}, {"text": "🏠 Menu Chính", "callback_data": "menu_home"}]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
 
     async def _cmd_stack(self, args: List[str]):
         if not args:
-            await self.send_message("⚠️ Cú pháp: <code>/stack &lt;link_sản_phẩm&gt;</code>")
+            await self.send_message("⚠️ Cú pháp: <code>/stack &lt;link_sản_phẩm_hoặc_mã_sp&gt;</code>")
             return
-        url = args[0]
-        parsed = self.shopee_connector.parse_shopee_url(url)
-        item_id = parsed["item_id"]
-        shop_id = parsed["shop_id"]
+        target = args[0]
+        if "shopee.vn" in target or "shp.ee" in target:
+            parsed = await self.shopee_connector.resolve_url_and_parse(target)
+            item_id = parsed["item_id"]
+            shop_id = parsed["shop_id"]
+        else:
+            item_id = target
+            p_exist = database.get_product_by_id(item_id)
+            shop_id = p_exist.get("shop_id") if p_exist else "0"
 
         details = await self.shopee_connector.fetch_product_details(item_id, shop_id)
         price = details.get("original_price", 650000.0)
         direct_discount = details.get("shop_direct_discount", 50000.0)
 
-        # Lấy voucher tốt nhất để gộp thử
         vouchers = database.get_vouchers(min_score=70)
         shop_v = next((v for v in vouchers if v["voucher_type"] == "SHOP"), None)
         plat_v = next((v for v in vouchers if v["voucher_type"] == "PLATFORM"), None)
@@ -357,9 +614,15 @@ class TelegramBotService:
             f"💥 <b>GIÁ THỰC TRẢ DỰ KIẾN:</b> <b><u>{int(res['final_price']):,}đ</u></b>\n"
             f"📉 Tiết kiệm: <b>{int(res['total_savings']):,}đ (-{res['discount_percent']}%)</b>\n"
             f"🛡 Độ tin cậy gộp mã: <b>{res['confidence']}</b>\n"
-            f"🚫 <i>Cam kết ZERO FREESHIP: Phí vận chuyển không tham gia tính toán.</i>"
+            f"🚫 <i>Cam kết ZERO FREESHIP: Tuyệt đối không trừ ship ảo.</i>"
         )
-        await self.send_message(msg)
+        buttons = {
+            "inline_keyboard": [
+                [{"text": "🛒 Bấm Mua Ngay", "url": details.get("product_url", "https://shopee.vn")}],
+                [{"text": "📋 Xem Watchlist", "callback_data": "menu_list"}, {"text": "🏠 Menu Chính", "callback_data": "menu_home"}]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
 
     async def _cmd_history(self, args: List[str]):
         if not args:
@@ -374,7 +637,31 @@ class TelegramBotService:
         msg = f"📈 <b>LỊCH SỬ BIẾN ĐỘNG GIÁ (CHỐNG GIÁ ẢO):</b> <code>{item_id}</code>\n\n"
         for h in history[:10]:
             msg += f"• {h['recorded_at'][:16]}: <b>{int(h['price']):,}đ</b>\n"
-        await self.send_message(msg)
+        
+        buttons = {
+            "inline_keyboard": [
+                [{"text": "📋 Quay Lại Watchlist", "callback_data": "menu_list"}],
+                [{"text": "🏠 Menu Chính", "callback_data": "menu_home"}]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
+
+    async def _cmd_del(self, args: List[str]):
+        if not args:
+            await self.send_message("⚠️ Cú pháp: <code>/del &lt;item_id&gt;</code>")
+            return
+        item_id = args[0]
+        p = database.get_product_by_id(item_id)
+        name = p.get("name", item_id) if p else item_id
+        database.delete_product(item_id)
+        msg = f"🗑 Đã xóa <b>{name}</b> khỏi Watchlist thành công."
+        buttons = {
+            "inline_keyboard": [
+                [{"text": "📋 Xem Lại Watchlist", "callback_data": "menu_list"}],
+                [{"text": "🏠 Menu Chính", "callback_data": "menu_home"}]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
 
     async def _cmd_settings(self):
         cfg = database.get_user_settings()
@@ -382,17 +669,77 @@ class TelegramBotService:
         newuser_str = "BẬT" if cfg.get("allow_new_user_vouchers") == 1 else "TẮT"
         msg = (
             "⚙️ <b>CÀI ĐẶT CÁ NHÂN (USER SETTINGS)</b>\n\n"
-            f"• Thông báo Telegram: <b>{muted_str}</b> (/mute | /unmute)\n"
+            f"• Thông báo Telegram: <b>{muted_str}</b>\n"
             f"• Điểm chất lượng tối thiểu: <b>{cfg.get('min_quality_score', 70)}/100</b>\n"
-            f"• Số tiền tiết kiệm tối thiểu: <b>{int(cfg.get('min_save_amount', 50000)):,}đ</b> (/minsave)\n"
-            f"• Nhận voucher tân thủ: <b>{newuser_str}</b> (/newuser)\n"
-            f"• Các sàn đang bật: <b>{cfg.get('active_platforms', '[\"SHOPEE\"]')}</b> (/platform)\n"
+            f"• Số tiền tiết kiệm tối thiểu: <b>{int(cfg.get('min_save_amount', 50000)):,}đ</b>\n"
+            f"• Nhận voucher tân thủ: <b>{newuser_str}</b>\n"
+            f"• Các sàn đang bật: <b>{cfg.get('active_platforms', '[\"SHOPEE\"]')}</b>\n"
             f"• Bài trừ Freeship: <b>100% CỨNG (KHÔNG THỂ TẮT)</b>"
         )
-        await self.send_message(msg)
+        toggle_mute_text = "🔔 Bật Chuông Cảnh Báo" if cfg.get("is_muted") == 1 else "🔕 Tắt Chuông Cảnh Báo"
+        buttons = {
+            "inline_keyboard": [
+                [
+                    {"text": toggle_mute_text, "callback_data": "menu_mute_toggle"}
+                ],
+                [
+                    {"text": "⚡️ Quét Deal Ngay", "callback_data": "menu_check"},
+                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"}
+                ],
+                [
+                    {"text": "🏠 Quay Lại Menu Chính", "callback_data": "menu_home"}
+                ]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
+
+    async def _cmd_keyword(self, args: List[str]):
+        if not args:
+            await self.send_message("⚠️ Cú pháp: <code>/keyword &lt;từ_khóa&gt; &lt;giá_mục_tiêu&gt;</code>")
+            return
+        kw = " ".join(args)
+        await self.send_message(f"🔍 Đã lưu từ khóa theo dõi: <b>{kw}</b>.")
+
+    async def _cmd_category(self, args: List[str]):
+        if not args:
+            await self.send_message("⚠️ Cú pháp: <code>/category &lt;tên_ngành_hàng&gt;</code>")
+            return
+        cat = " ".join(args)
+        await self.send_message(f"🏷 Đã đặt ngành hàng ưu tiên: <b>{cat}</b>.")
+
+    async def _cmd_minsave(self, args: List[str]):
+        if not args:
+            await self.send_message("⚠️ Cú pháp: <code>/minsave &lt;số_tiền_tiết_kiệm&gt;</code>")
+            return
+        try:
+            val = float(args[0].replace(",", "").replace(".", "").replace("k", "000"))
+            database.update_user_settings("min_save_amount", val)
+            await self.send_message(f"💰 Đã cập nhật mức tiết kiệm tối thiểu: <b>{int(val):,}đ</b>.")
+        except ValueError:
+            await self.send_message("❌ Số tiền không hợp lệ.")
+
+    async def _cmd_newuser(self, args: List[str]):
+        if not args or args[0].lower() not in ["on", "off"]:
+            await self.send_message("⚠️ Cú pháp: <code>/newuser on</code> hoặc <code>/newuser off</code>")
+            return
+        val = 1 if args[0].lower() == "on" else 0
+        database.update_user_settings("allow_new_user_vouchers", val)
+        status_str = "CHO PHÉP" if val == 1 else "CẤM (BỎ QUA)"
+        await self.send_message(f"👤 Cài đặt mã tân thủ: <b>{status_str}</b>.")
+
+    async def _cmd_platform(self, args: List[str]):
+        if not args:
+            await self.send_message("⚠️ Cú pháp: <code>/platform shopee|lazada|tiktok|all</code>")
+            return
+        target = args[0].upper()
+        plats = ["SHOPEE", "LAZADA", "TIKTOK"] if target == "ALL" else [target]
+        database.update_user_settings("active_platforms", json.dumps(plats))
+        await self.send_message(f"🌐 Nền tảng đang theo dõi: <b>{', '.join(plats)}</b>")
+
+    # ----------------- LONG POLLING VÀ XỬ LÝ SỰ KIỆN -----------------
 
     async def start_polling(self):
-        """Lắng nghe câu lệnh Telegram qua Long Polling an toàn"""
+        """Lắng nghe câu lệnh Telegram & nút bấm Inline Keyboard qua Long Polling an toàn"""
         self.is_running = True
         print(f"🤖 Telegram Bot Service đang hoạt động (Chat ID: {self.chat_id})...")
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -404,17 +751,89 @@ class TelegramBotService:
                         data = res.json()
                         for update in data.get("result", []):
                             self.last_update_id = update["update_id"]
-                            # Xử lý tin nhắn text
+                            
+                            # 1. Tin nhắn Text từ người dùng
                             if "message" in update and "text" in update["message"]:
                                 msg_text = update["message"]["text"]
                                 sender_id = str(update["message"]["chat"]["id"])
                                 asyncio.create_task(self.handle_command(msg_text, sender_id))
-                            # Xử lý callback button
+
+                            # 2. Bấm nút Inline Keyboard (Callback Query)
                             elif "callback_query" in update:
-                                cb_data = update["callback_query"]["data"]
-                                if cb_data.startswith("why_"):
+                                cb = update["callback_query"]
+                                cb_id = cb["id"]
+                                cb_data = cb.get("data", "")
+                                sender_id = str(cb["from"]["id"])
+                                
+                                # Tắt hiệu ứng loading đồng hồ quay trên nút
+                                asyncio.create_task(self.answer_callback(cb_id))
+
+                                # Điều hướng sự kiện nút bấm
+                                if cb_data == "menu_home":
+                                    asyncio.create_task(self._cmd_help())
+                                elif cb_data == "menu_hot":
+                                    asyncio.create_task(self._cmd_vouchers(min_score=85, hot_only=True))
+                                elif cb_data == "menu_vouchers":
+                                    asyncio.create_task(self._cmd_vouchers(min_score=70))
+                                elif cb_data == "menu_list":
+                                    asyncio.create_task(self._cmd_list_watchlist())
+                                elif cb_data == "menu_add_guide":
+                                    asyncio.create_task(self._cmd_add_guide())
+                                elif cb_data == "menu_check":
+                                    asyncio.create_task(self._cmd_scan_now())
+                                elif cb_data == "menu_settings":
+                                    asyncio.create_task(self._cmd_settings())
+                                elif cb_data == "menu_mute_toggle":
+                                    cfg = database.get_user_settings()
+                                    new_mute = 0 if cfg.get("is_muted") == 1 else 1
+                                    database.update_user_settings("is_muted", new_mute)
+                                    asyncio.create_task(self._cmd_settings())
+                                elif cb_data.startswith("why_"):
                                     v_id = cb_data.replace("why_", "")
                                     asyncio.create_task(self._cmd_why([v_id]))
+                                elif cb_data.startswith("stack_"):
+                                    item_id = cb_data.replace("stack_", "")
+                                    asyncio.create_task(self._cmd_stack([item_id]))
+                                elif cb_data.startswith("history_"):
+                                    item_id = cb_data.replace("history_", "")
+                                    asyncio.create_task(self._cmd_history([item_id]))
+                                elif cb_data.startswith("del_"):
+                                    item_id = cb_data.replace("del_", "")
+                                    asyncio.create_task(self._cmd_del([item_id]))
+                                elif cb_data.startswith("target_"):
+                                    # target_{item_id}_{pct}
+                                    parts = cb_data.split("_")
+                                    if len(parts) >= 3:
+                                        t_item_id = parts[1]
+                                        t_pct = float(parts[2])
+                                        p_exist = database.get_product_by_id(t_item_id)
+                                        if p_exist:
+                                            # Cập nhật mục tiêu và đánh giá lại
+                                            database.add_product(
+                                                item_id=t_item_id,
+                                                shop_id=p_exist.get("shop_id", "0"),
+                                                name=p_exist["name"],
+                                                url=p_exist["product_url"],
+                                                image_url=p_exist.get("image_url"),
+                                                target_mode="PERCENT",
+                                                target_value=t_pct,
+                                                baseline_price=p_exist.get("baseline_market_price") or p_exist.get("baseline_price", 0)
+                                            )
+                                            vouchers = database.get_vouchers(min_score=60)
+                                            p_updated = database.get_product_by_id(t_item_id)
+                                            eval_res = calculator.stack_vouchers_and_evaluate(p_updated, vouchers)
+                                            database.update_product_evaluation(
+                                                item_id=t_item_id,
+                                                current_price=eval_res["current_price"],
+                                                final_price=eval_res["final_price"],
+                                                discount_percent=eval_res["discount_percent"],
+                                                is_deal_ready=1 if eval_res["is_deal_ready"] else 0,
+                                                applied_vouchers=eval_res["applied_vouchers"]
+                                            )
+                                            asyncio.create_task(self.send_message(
+                                                f"🎯 Đã cập nhật mục tiêu cho <b>{p_exist['name']}</b>: <b>Giảm ≥ {t_pct}%</b>!\n"
+                                                f"Giá sau gộp mã hiện tại: <b>{int(eval_res['final_price']):,}đ</b> (-{eval_res['discount_percent']}%)"
+                                            ))
                 except asyncio.CancelledError:
                     break
                 except Exception as e:

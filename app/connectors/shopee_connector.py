@@ -187,6 +187,23 @@ class ShopeeConnector(BasePlatformConnector):
         }
 
     @staticmethod
+    async def resolve_url_and_parse(url: str) -> Dict[str, Optional[str]]:
+        """Giải mã link rút gọn (nếu có) rồi trích xuất shop_id và item_id"""
+        clean_url = url.strip()
+        # Nếu là link rút gọn từ điện thoại (s.shopee.vn hoặc vn.shp.ee)
+        if "shp.ee" in clean_url or "shopee.vn/universal-link" in clean_url:
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                    resp = await client.get(clean_url, headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                    })
+                    clean_url = str(resp.url)
+            except Exception:
+                pass
+
+        return ShopeeConnector.parse_shopee_url(clean_url)
+
+    @staticmethod
     def parse_shopee_url(url: str) -> Dict[str, Optional[str]]:
         """Phân tích trích xuất item_id và shop_id từ URL Shopee"""
         clean_url = url.split("?")[0]
@@ -201,5 +218,12 @@ class ShopeeConnector(BasePlatformConnector):
         match3 = re.findall(r"-i\.(\d+)\.(\d+)", clean_url)
         if match3:
             return {"shop_id": match3[0][0], "item_id": match3[0][1]}
+
+        # Fallback tìm 2 cụm số lớn cuối cùng
+        digits = re.findall(r'\b\d{6,15}\b', clean_url)
+        if len(digits) >= 2:
+            return {"shop_id": digits[-2], "item_id": digits[-1]}
+        elif len(digits) == 1:
+            return {"shop_id": "0", "item_id": digits[0]}
 
         return {"shop_id": None, "item_id": None}
