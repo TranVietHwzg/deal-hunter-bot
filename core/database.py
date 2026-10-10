@@ -269,6 +269,12 @@ def init_db():
     );
     """)
 
+    # Đảm bảo có cột is_hidden
+    try:
+        cursor.execute("ALTER TABLE vouchers ADD COLUMN is_hidden INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
     # Nạp 3 sàn mặc định nếu chưa có
     cursor.execute("""
     INSERT OR IGNORE INTO platforms (id, name, base_url, is_enabled, rate_limit_per_minute)
@@ -295,9 +301,8 @@ def init_db():
 # ----------------- CÁC HÀM TRUY XUẤT VOUCHER & PRODUCT -----------------
 
 def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
-    """Thêm hoặc cập nhật voucher với ràng buộc chống freeship và tính score"""
+    """Thêm hoặc cập nhật voucher với mã nhập tay và mã ẩn"""
     from app.core.junk_filter import is_freeship, validate_voucher
-    from app.core.scoring_engine import calculate_voucher_quality_score
 
     # Kiểm tra bài trừ Freeship tuyệt đối
     is_ship, reason = is_freeship(voucher_data)
@@ -308,14 +313,10 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
     if not is_valid:
         return False
 
-    # Tính điểm chất lượng 0 - 100
-    score, _ = calculate_voucher_quality_score(voucher_data)
-    is_hot = 1 if score >= 85 else 0
-
-    v_id = str(voucher_data.get("id") or f"{voucher_data.get('platform_id', 'SHOPEE')}_{voucher_data.get('voucher_id_on_platform') or voucher_data.get('voucher_code')}")
+    v_id = str(voucher_data.get("id") or voucher_data.get("voucher_id") or f"{voucher_data.get('platform_id', 'SHOPEE')}_{voucher_data.get('voucher_id_on_platform') or voucher_data.get('voucher_code')}")
     plat_id = str(voucher_data.get("platform_id", "SHOPEE")).upper()
     v_ext_id = str(voucher_data.get("voucher_id_on_platform") or voucher_data.get("voucher_code") or v_id)
-    v_code = voucher_data.get("voucher_code")
+    v_code = str(voucher_data.get("voucher_code") or "").strip()
     v_type = str(voucher_data.get("voucher_type", "PLATFORM")).upper()
     category = voucher_data.get("category", "")
     title = str(voucher_data.get("title", ""))
@@ -329,6 +330,8 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
     claim_url = voucher_data.get("claim_url", "https://shopee.vn")
     guide = voucher_data.get("guide", "")
     status = str(voucher_data.get("status", "ACTIVE")).upper()
+    is_hidden = 1 if (voucher_data.get("is_hidden") == 1 or "ẨN" in title.upper() or "AN" in category.upper()) else 0
+    is_hot = 1 if (d_val >= 100000 or (d_type in ["PERCENTAGE", "PERCENT"] and d_val >= 15)) else 0
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -336,9 +339,9 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
     INSERT INTO vouchers (
         id, platform_id, voucher_id_on_platform, voucher_code, voucher_type, category,
         title, description, discount_type, discount_value, max_discount_amount, min_spend,
-        shop_id, shop_name, claim_url, guide, status, quality_score, is_hot, is_freeship,
+        shop_id, shop_name, claim_url, guide, status, quality_score, is_hot, is_freeship, is_hidden,
         last_verified_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 90, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT(platform_id, voucher_id_on_platform) DO UPDATE SET
         voucher_code=excluded.voucher_code,
         voucher_type=excluded.voucher_type,
@@ -352,42 +355,41 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
         claim_url=excluded.claim_url,
         guide=excluded.guide,
         status=excluded.status,
-        quality_score=excluded.quality_score,
         is_hot=excluded.is_hot,
+        is_hidden=excluded.is_hidden,
         last_verified_at=CURRENT_TIMESTAMP,
         updated_at=CURRENT_TIMESTAMP;
     """, (
         v_id, plat_id, v_ext_id, v_code, v_type, category,
         title, desc, d_type, d_val, max_d, min_sp,
-        shop_id, shop_name, claim_url, guide, status, score, is_hot
+        shop_id, shop_name, claim_url, guide, status, is_hot, is_hidden
     ))
     conn.commit()
     conn.close()
     return True
 
 def get_vouchers(
-    min_score: int = 70,
+    min_score: int = 0,
     hot_only: bool = False,
     platform: Optional[str] = None
 ) -> List[Dict[str, Any]]:
-    """Lấy danh sách voucher chất lượng cao, bài trừ freeship"""
+    """Lấy danh sách mã giảm giá, ưu tiên mã ẩn và mã nhập tay"""
     conn = get_connection()
     cursor = conn.cursor()
 
     query = """
     SELECT * FROM vouchers 
     WHERE is_freeship = 0 AND status IN ('ACTIVE', 'RESTOCKED')
-      AND quality_score >= ?
     """
-    params = [min_score]
+    params = []
 
     if hot_only:
-        query += " AND is_hot = 1"
+        query += " AND (is_hot = 1 OR is_hidden = 1 OR discount_value >= 50000)"
     if platform and platform.upper() != "ALL":
         query += " AND platform_id = ?"
         params.append(platform.upper())
 
-    query += " ORDER BY quality_score DESC, discount_value DESC LIMIT 50"
+    query += " ORDER BY is_hidden DESC, is_hot DESC, discount_value DESC LIMIT 50"
 
     cursor.execute(query, params)
     rows = cursor.fetchall()

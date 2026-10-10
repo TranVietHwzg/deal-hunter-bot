@@ -1,6 +1,13 @@
 import asyncio
 import hashlib
+import sys
 from datetime import datetime
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 from core import database, calculator
 from scrapers import shopee, voucher_hunter
 from app.connectors.shopee_connector import ShopeeConnector
@@ -23,11 +30,11 @@ async def seed_default_vouchers():
 async def run_scan_cycle(bot_instance=None):
     """Quét 1 chu kỳ đối soát giá toàn bộ sản phẩm và kho voucher"""
     await seed_default_vouchers()
-    vouchers = database.get_vouchers(min_score=60)
+    vouchers = database.get_vouchers()
     
-    # 1. TỰ ĐỘNG BẮN CẢNH BÁO VOUCHER XỊN / HOT (KHÔNG CẦN ẤN THỦ CÔNG)
+    # 1. TỰ ĐỘNG BẮN CẢNH BÁO VOUCHER XỊN / MÃ ẨN (KHÔNG CẦN ẤN THỦ CÔNG)
     if bot_instance:
-        hot_vouchers = database.get_vouchers(min_score=75)
+        hot_vouchers = database.get_vouchers(hot_only=True)
         for hv in hot_vouchers:
             # broadcast_hot_alert có SHA-256 deduplication, chỉ bắn 1 lần cho voucher mới
             await bot_instance.broadcast_hot_alert(hv)

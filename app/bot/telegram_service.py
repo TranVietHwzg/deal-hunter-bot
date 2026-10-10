@@ -72,7 +72,7 @@ class TelegramBotService:
             pass
 
     async def broadcast_hot_alert(self, voucher: Dict[str, Any], example_product: Optional[Dict[str, Any]] = None) -> bool:
-        """Gửi cảnh báo Hot Voucher tự động với cơ chế SHA-256 Deduplication chống spam"""
+        """Gửi cảnh báo voucher tự động với mã nhập tay / mã ẩn để chạm sao chép"""
         user_cfg = database.get_user_settings()
         if user_cfg.get("is_muted") == 1:
             return False
@@ -82,15 +82,10 @@ class TelegramBotService:
         if is_ship:
             return False
 
-        # Kiểm tra ngưỡng điểm
-        score = voucher.get("quality_score", 0)
-        min_thresh = user_cfg.get("min_quality_score", 70)
-        if score < min_thresh:
-            return False
-
         # Tạo hash SHA-256 để chống gửi trùng lặp
         v_id = voucher.get("id") or voucher.get("voucher_id_on_platform")
-        hash_input = f"HOT_{v_id}_{voucher.get('discount_value')}_{voucher.get('min_spend')}"
+        code = voucher.get("voucher_code") or ""
+        hash_input = f"HOT_{v_id}_{code}_{voucher.get('discount_value')}"
         dedup_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
         # Kiểm tra trùng trong database
@@ -100,15 +95,11 @@ class TelegramBotService:
         msg = format_hot_voucher_alert(voucher, example_product)
         claim_url = voucher.get("claim_url", "https://shopee.vn")
 
-        # Nút bấm gọn gàng, sắp xếp khoa học theo dạng lưới 2 cột
+        # Nút bấm siêu gọn gàng, xếp 2 cột
         buttons = {
             "inline_keyboard": [
                 [
-                    {"text": "🎫 LƯU MÃ TRÊN SHOPEE", "url": claim_url}
-                ],
-                [
-                    {"text": "🔍 Bảng Điểm (/why)", "callback_data": f"why_{v_id}"},
-                    {"text": "⚡️ Quét Thử Deal", "callback_data": "menu_check"}
+                    {"text": "🛒 MỞ SHOPEE ÁP MÃ NGAY", "url": claim_url}
                 ],
                 [
                     {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
@@ -123,8 +114,7 @@ class TelegramBotService:
                 alert_type="HOT_VOUCHER",
                 dedup_hash=dedup_hash,
                 message_payload=msg,
-                voucher_id=v_id,
-                quality_score=score
+                voucher_id=v_id
             )
             return True
         return False
@@ -500,38 +490,37 @@ class TelegramBotService:
         }
         await self.send_message(msg, reply_markup=buttons)
 
-    async def _cmd_vouchers(self, min_score: int = 70, hot_only: bool = False):
-        vouchers = database.get_vouchers(min_score=min_score, hot_only=hot_only)
+    async def _cmd_vouchers(self, min_score: int = 0, hot_only: bool = False):
+        vouchers = database.get_vouchers(hot_only=hot_only)
         if not vouchers:
-            await self.send_message("Hiện tại chưa có voucher nào đạt tiêu chí (Hệ thống đã tự động lọc sạch 100% voucher freeship và voucher rác).")
+            await self.send_message("Hiện tại chưa có mã giảm nào. Hãy bấm Quét Deal để cập nhật.")
             return
 
-        header = "🔥 <b>SIÊU VOUCHER HOT (SCORE ≥ 85)</b>\n\n" if hot_only else "🎫 <b>KHO VOUCHER XỊN ĐANG HOẠT ĐỘNG (SCORE ≥ 70)</b>\n\n"
+        header = "🔑 <b>DANH SÁCH MÃ GIẢM HOT & MÃ ẨN:</b>\n\n"
         body = ""
         kb_rows = []
 
-        for i, v in enumerate(vouchers[:6], 1):
+        for i, v in enumerate(vouchers[:8], 1):
             d_val = int(v['discount_value'])
-            d_str = f"Giảm {v['discount_value']}% (Tối đa {int(v['max_discount_amount']):,}đ)" if v['discount_type'] in ['PERCENT', 'PERCENTAGE'] else f"Giảm {d_val:,}đ"
-            min_sp = f"Đơn từ {int(v['min_spend']):,}đ" if v['min_spend'] > 0 else "Đơn từ 0đ"
-            v_id = v['voucher_id_on_platform']
+            d_str = f"Giảm {int(v['discount_value'])}% (Tối đa {int(v['max_discount_amount']):,}đ)" if v['discount_type'] in ['PERCENT', 'PERCENTAGE'] else f"Giảm {d_val:,}đ"
+            min_sp = f"đơn từ {int(v['min_spend']):,}đ" if v['min_spend'] > 0 else "đơn 0đ"
+            code = v.get("voucher_code") or "LƯU BANNER"
+            is_hid = "🔑 [MÃ ẨN] " if v.get("is_hidden") == 1 else "🏷 "
             
             body += (
-                f"{i}. <b>[{v['platform_id']}] {v['title']}</b>\n"
-                f"   💰 <b>{d_str}</b> | 🛒 {min_sp}\n"
-                f"   ⭐ Điểm: <b>{v['quality_score']}/100</b>\n\n"
+                f"{i}. {is_hid}<code>{code}</code>\n"
+                f"   💰 <b>{d_str}</b> ({min_sp})\n"
+                f"   📦 {v.get('category') or 'Toàn sàn'}\n\n"
             )
-            short_t = v['title'][:16] + ".." if len(v['title']) > 16 else v['title']
-            kb_rows.append([
-                {"text": f"🎫 Lấy Mã: {short_t}", "url": v.get("claim_url", "https://shopee.vn")},
-                {"text": "🔍 Xem Điểm", "callback_data": f"why_{v_id}"}
-            ])
+
+        body += "👉 <i>Chạm vào mã chữ in đậm để sao chép nhanh rồi dán vào giỏ hàng Shopee!</i>"
 
         kb_rows.append([
-            {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
-            {"text": "⚡️ Quét Lại", "callback_data": "menu_check"}
+            {"text": "🛒 Mở Shopee Áp Mã", "url": "https://shopee.vn/m/ma-giam-gia"},
+            {"text": "📋 Xem Watchlist", "callback_data": "menu_list"}
         ])
         kb_rows.append([
+            {"text": "⚡️ Quét Cập Nhật Mã", "callback_data": "menu_check"},
             {"text": "🏠 Menu Chính", "callback_data": "menu_home"}
         ])
 
@@ -539,7 +528,7 @@ class TelegramBotService:
 
     async def _cmd_why(self, args: List[str]):
         if not args:
-            await self.send_message("⚠️ Cú pháp: <code>/why &lt;voucher_id&gt;</code>")
+            await self.send_message("⚠️ Cú pháp: <code>/why &lt;voucher_code&gt;</code>")
             return
         v_id = args[0]
         voucher = database.get_voucher_by_id(v_id)
@@ -547,26 +536,18 @@ class TelegramBotService:
             await self.send_message(f"❌ Không tìm thấy voucher với mã <code>{v_id}</code>.")
             return
 
-        score, b = calculate_voucher_quality_score(voucher)
+        code = voucher.get("voucher_code") or "LƯU BANNER"
         msg = (
-            f"📊 <b>GIẢI MÃ ĐIỂM CHẤT LƯỢNG VOUCHER (0 - 100)</b>\n"
-            f"Voucher: <b>{voucher.get('title')}</b>\n"
-            f"Tổng điểm: <b><u>{score}/100</u></b>\n\n"
-            f"1. Tiền giảm thực tế: <b>+{b.get('p1_cash_reduction', {}).get('points', 0)}đ</b> ({b.get('p1_cash_reduction', {}).get('value')})\n"
-            f"2. Tỷ lệ % giảm: <b>+{b.get('p2_discount_rate', {}).get('points', 0)}đ</b> ({b.get('p2_discount_rate', {}).get('value')})\n"
-            f"3. Đơn tối thiểu hợp lý: <b>+{b.get('p3_min_spend_ratio', {}).get('points', 0)}đ</b> (Đơn từ {b.get('p3_min_spend_ratio', {}).get('min_spend')})\n"
-            f"4. Còn lượt & Xác minh: <b>+{b.get('p4_availability_confidence', {}).get('points', 0)}đ</b>\n"
-            f"5. Khả năng gộp mã: <b>+{b.get('p5_stackability', {}).get('points', 0)}đ</b>\n"
-            f"6. Phù hợp mục tiêu: <b>+{b.get('p6_watchlist_relevance', {}).get('points', 0)}đ</b>\n"
-            f"7. Thời hạn sử dụng: <b>+{b.get('p7_usable_time_window', {}).get('points', 0)}đ</b>\n"
+            f"🏷 <b>MÃ GIẢM GIÁ:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n\n"
+            f"• <b>Tên ưu đãi:</b> {voucher.get('title')}\n"
+            f"• <b>Đơn tối thiểu:</b> {int(voucher.get('min_spend', 0)):,}đ\n"
+            f"• <b>Áp dụng:</b> {voucher.get('category') or 'Toàn sàn'}\n"
+            f"• <b>Cách dùng:</b> {voucher.get('guide') or 'Nhập mã vào ô Shopee Voucher khi thanh toán.'}"
         )
-        if b.get("penalties", {}).get("total_deduction", 0) > 0:
-            msg += f"\n⚠️ <b>Điểm trừ phạt:</b> -{b['penalties']['total_deduction']}đ ({', '.join(b['penalties']['reasons'])})"
-
         buttons = {
             "inline_keyboard": [
-                [{"text": "🎫 Lưu Mã Này Ngay", "url": voucher.get("claim_url", "https://shopee.vn")}],
-                [{"text": "🔥 Xem Thêm Mã HOT", "callback_data": "menu_hot"}, {"text": "🏠 Menu Chính", "callback_data": "menu_home"}]
+                [{"text": "🛒 Mở Shopee Áp Mã", "url": voucher.get("claim_url", "https://shopee.vn")}],
+                [{"text": "📋 Xem Watchlist", "callback_data": "menu_list"}, {"text": "🏠 Menu Chính", "callback_data": "menu_home"}]
             ]
         }
         await self.send_message(msg, reply_markup=buttons)
