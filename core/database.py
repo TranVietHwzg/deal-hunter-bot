@@ -119,6 +119,18 @@ def init_db():
         is_freeship INTEGER NOT NULL DEFAULT 0,
         start_time TEXT,
         end_time TEXT,
+        platform TEXT DEFAULT 'SHOPEE',
+        scope_type TEXT DEFAULT 'PLATFORM',
+        shop_url TEXT,
+        category_names TEXT,
+        max_discount REAL,
+        min_order_value REAL DEFAULT 0,
+        timezone TEXT DEFAULT 'Asia/Ho_Chi_Minh',
+        source_url TEXT DEFAULT 'https://shopee.vn',
+        source_type TEXT DEFAULT 'CAMPAIGN_PAGE',
+        confidence_score INTEGER DEFAULT 90,
+        first_seen_at TEXT,
+        last_seen_at TEXT,
         last_verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -126,6 +138,31 @@ def init_db():
         CONSTRAINT chk_no_freeship CHECK (is_freeship = 0)
     );
     """)
+
+    # Đồng bộ các cột mở rộng cho bảng vouchers
+    v_cols = [c[1] for c in cursor.execute("PRAGMA table_info(vouchers)").fetchall()]
+    migration_cols = {
+        "platform": "TEXT DEFAULT 'SHOPEE'",
+        "scope_type": "TEXT DEFAULT 'PLATFORM'",
+        "shop_url": "TEXT",
+        "category_names": "TEXT",
+        "max_discount": "REAL",
+        "min_order_value": "REAL DEFAULT 0",
+        "timezone": "TEXT DEFAULT 'Asia/Ho_Chi_Minh'",
+        "source_url": "TEXT DEFAULT 'https://shopee.vn'",
+        "source_type": "TEXT DEFAULT 'CAMPAIGN_PAGE'",
+        "confidence_score": "INTEGER DEFAULT 90",
+        "first_seen_at": "TEXT",
+        "last_seen_at": "TEXT"
+    }
+    for col_name, col_type in migration_cols.items():
+        if col_name not in v_cols:
+            try:
+                cursor.execute(f"ALTER TABLE vouchers ADD COLUMN {col_name} {col_type};")
+            except Exception as e:
+                print(f"[Database] Lưu ý khi thêm cột {col_name}: {e}")
+    conn.commit()
+
 
     # 3. Bảng Voucher Conditions
     cursor.execute("""
