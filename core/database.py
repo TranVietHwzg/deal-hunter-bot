@@ -376,6 +376,9 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
     ) else 0
     is_hot = 1 if (d_val >= 100000 or (d_type in ["PERCENTAGE", "PERCENT"] and d_val >= 15)) else 0
 
+    start_time = voucher_data.get("start_time")
+    end_time = voucher_data.get("end_time")
+
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -383,8 +386,8 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
         id, platform_id, voucher_id_on_platform, voucher_code, voucher_type, category,
         title, description, discount_type, discount_value, max_discount_amount, min_spend,
         shop_id, shop_name, claim_url, guide, status, quality_score, is_hot, is_freeship, is_hidden,
-        last_verified_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 90, ?, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        start_time, end_time, last_verified_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 90, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT(platform_id, voucher_id_on_platform) DO UPDATE SET
         voucher_code=excluded.voucher_code,
         voucher_type=excluded.voucher_type,
@@ -402,12 +405,15 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
         status=excluded.status,
         is_hot=excluded.is_hot,
         is_hidden=excluded.is_hidden,
+        start_time=excluded.start_time,
+        end_time=excluded.end_time,
         last_verified_at=CURRENT_TIMESTAMP,
         updated_at=CURRENT_TIMESTAMP;
     """, (
         v_id, plat_id, v_ext_id, v_code, v_type, category,
         title, desc, d_type, d_val, max_d, min_sp,
-        shop_id, shop_name, claim_url, guide, status, is_hot, is_hidden
+        shop_id, shop_name, claim_url, guide, status, is_hot, is_hidden,
+        start_time, end_time
     ))
     conn.commit()
     conn.close()

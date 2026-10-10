@@ -11,7 +11,7 @@ from config.feature_flags import feature_flags
 from app.core.scoring_engine import calculate_voucher_quality_score
 from app.core.stacking_engine import calculate_stacked_price
 from app.core.junk_filter import is_freeship, validate_voucher
-from app.bot.templates import format_hot_voucher_alert, format_restock_alert, get_voucher_shop_scope
+from app.bot.templates import format_hot_voucher_alert, format_restock_alert, get_voucher_shop_scope, format_voucher_time
 from core import database, calculator
 from app.connectors.shopee_connector import ShopeeConnector
 
@@ -629,6 +629,7 @@ class TelegramBotService:
             d_str = f"Giảm {int(v['discount_value'])}% (Tối đa {int(v['max_discount_amount']):,}đ)" if v['discount_type'] in ['PERCENT', 'PERCENTAGE'] else f"Giảm {d_val:,}đ"
             min_sp = f"đơn từ {int(v['min_spend']):,}đ" if v['min_spend'] > 0 else "đơn 0đ"
             code = v.get("voucher_code") or "LƯU BANNER"
+            time_str = format_voucher_time(v)
             
             shop_scope = get_voucher_shop_scope(v)
             shop_str = f"   🏪 <i>Chỉ áp dụng: Shop {shop_scope}</i>\n" if shop_scope else ""
@@ -637,6 +638,7 @@ class TelegramBotService:
             body += (
                 f"{i}. 🔑 <code>{code}</code>\n"
                 f"   💰 <b>{d_str}</b> (<b>{min_sp}</b>)\n"
+                f"   ⏰ <i>Hiệu lực: {time_str}</i>\n"
                 f"   📦 {cat_name}\n"
                 f"{shop_str}\n"
             )
@@ -670,6 +672,7 @@ class TelegramBotService:
             min_sp = f"đơn từ {int(v['min_spend']):,}đ" if v['min_spend'] > 0 else "đơn 0đ"
             code = v.get("voucher_code") or "LƯU BANNER"
             is_hid = "🔑 [MÃ ẨN] " if v.get("is_hidden") == 1 else "🏷 "
+            time_str = format_voucher_time(v)
             
             shop_scope = get_voucher_shop_scope(v)
             shop_str = f"   🏪 <i>Chỉ áp dụng: Shop {shop_scope}</i>\n" if shop_scope else ""
@@ -677,6 +680,7 @@ class TelegramBotService:
             body += (
                 f"{i}. {is_hid}<code>{code}</code>\n"
                 f"   💰 <b>{d_str}</b> ({min_sp})\n"
+                f"   ⏰ <i>Hiệu lực: {time_str}</i>\n"
                 f"   📦 {v.get('category') or 'Toàn sàn'}\n"
                 f"{shop_str}\n"
             )
@@ -707,10 +711,12 @@ class TelegramBotService:
         code = voucher.get("voucher_code") or "LƯU BANNER"
         shop_scope = get_voucher_shop_scope(voucher)
         shop_line = f"• <b>Áp dụng:</b> Chỉ Shop {shop_scope}\n" if shop_scope else ""
+        time_str = format_voucher_time(voucher)
         msg = (
             f"🏷 <b>MÃ GIẢM GIÁ:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n\n"
             f"• <b>Tên ưu đãi:</b> {voucher.get('title')}\n"
             f"• <b>Đơn tối thiểu:</b> {int(voucher.get('min_spend', 0)):,}đ\n"
+            f"• <b>Thời gian hiệu lực:</b> {time_str}\n"
             f"• <b>Phạm vi:</b> {voucher.get('category') or 'Toàn sàn'}\n"
             f"{shop_line}"
             f"• <b>Cách dùng:</b> {voucher.get('guide') or 'Nhập mã vào ô Shopee Voucher khi thanh toán.'}"
@@ -845,6 +851,12 @@ class TelegramBotService:
             v_type = "PLATFORM"
             cat = "Toàn sàn"
 
+        from datetime import datetime
+        now = datetime.now()
+        d_str = now.strftime("%d/%m")
+        start_time = f"00:00 ngày {d_str}"
+        end_time = f"23:59 ngày {d_str}"
+
         v_data = {
             "voucher_id": f"USER_{code}",
             "voucher_id_on_platform": code,
@@ -859,6 +871,8 @@ class TelegramBotService:
             "min_spend": min_spend,
             "shop_id": "0" if not is_shop_voucher else "USER_SHOP",
             "shop_name": shop_name,
+            "start_time": start_time,
+            "end_time": end_time,
             "claim_url": "https://shopee.vn/m/ma-giam-gia",
             "guide": f"Nhập mã {code} tại bước thanh toán.",
             "is_hidden": 1,
@@ -875,7 +889,8 @@ class TelegramBotService:
             f"✅ <b>ĐÃ THÊM MÃ GIẢM GIÁ THÀNH CÔNG!</b>\n\n"
             f"🏷 <b>Mã:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n"
             f"💰 <b>Mức giảm:</b> <b>{d_str}</b>\n"
-            f"🛒 <b>Điều kiện:</b> {min_str}"
+            f"🛒 <b>Điều kiện:</b> {min_str}\n"
+            f"⏰ <b>Hiệu lực:</b> {start_time} ➔ {end_time}"
             f"{shop_info}\n\n"
             f"💡 <i>Mã này đã được lưu vào kho và sẽ tự động đưa vào công thức tính gộp giá thực trả!</i>"
         )

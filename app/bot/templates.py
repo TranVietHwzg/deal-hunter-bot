@@ -32,10 +32,32 @@ def get_voucher_shop_scope(voucher: Dict[str, Any]) -> Optional[str]:
     # 3. Các loại toàn ngành / toàn sàn: PLATFORM, CATEGORY, LIVE_VIDEO... không ghi thông tin shop
     return None
 
+def format_voucher_time(voucher: Dict[str, Any]) -> str:
+    """
+    Định dạng thời gian hiệu lực và thời điểm kết thúc của voucher:
+    - Hiển thị rõ: bắt đầu lúc nào, kết thúc lúc nào.
+    """
+    start = voucher.get("start_time")
+    end = voucher.get("end_time")
+
+    if start and end:
+        if str(start).strip() == str(end).strip():
+            return f"Đến {end}"
+        return f"{start} ➔ {end}"
+    elif end:
+        return f"Hạn chót: Đến {end}"
+    elif start:
+        return f"Hiệu lực từ: {start}"
+
+    from datetime import datetime
+    now_str = datetime.now().strftime("%d/%m")
+    return f"00:00 - 23:59 ngày {now_str} (Dùng sớm kẻo hết)"
+
 def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[Dict[str, Any]] = None) -> str:
     """
     Mẫu cảnh báo voucher gọn gàng, làm nổi bật mã nhập tay / mã ẩn để chạm sao chép.
     Nếu áp dụng cho shop cụ thể: ghi rõ shop. Nếu toàn ngành / toàn sàn: không ghi.
+    Hiển thị rõ thời gian hiệu lực và hạn kết thúc.
     """
     platform = str(voucher.get("platform_id") or "SHOPEE").upper()
     title = voucher.get("title", "")
@@ -62,6 +84,7 @@ def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[
     min_spend_str = f"Đơn từ {int(min_spend):,}đ" if min_spend > 0 else "Đơn từ 0đ"
     claim_url = voucher.get("claim_url") or "https://shopee.vn"
     category = voucher.get("category") or "Toàn sàn"
+    time_str = format_voucher_time(voucher)
 
     if is_hidden:
         if "SIEUHOI" in code.upper() or "SIÊU HỘI" in str(voucher.get("category", "")).upper():
@@ -75,12 +98,13 @@ def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[
     shop_line = f"🏪 <b>Áp dụng:</b> Chỉ Shop {shop_scope}\n" if shop_scope else ""
     extra_guide = f"💡 <i>Vào giỏ hàng, dán mã <code>{code}</code> vào ô \"Shopee Voucher\" để nhận ngay!</i>\n" if is_hidden else ""
 
-    # Định dạng siêu gọn: 5 dòng cốt lõi (chỉ thêm dòng shop nếu áp dụng cho shop cụ thể)
+    # Định dạng siêu gọn: hiển thị rõ mức giảm, điều kiện, và thời gian hiệu lực
     msg = (
         f"{tag} — <b>[{platform}]</b>\n\n"
         f"🏷 <b>Mã nhập:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n"
         f"💰 <b>Mức giảm:</b> <b>{discount_str}</b>\n"
         f"🛒 <b>Điều kiện:</b> {min_spend_str} | {category}\n"
+        f"⏰ <b>Hiệu lực:</b> {time_str}\n"
         f"{shop_line}"
         f"{extra_guide}"
         f"🔗 <a href=\"{claim_url}\">Mở Shopee áp mã ngay</a>"
@@ -121,10 +145,12 @@ def format_restock_alert(voucher: Dict[str, Any]) -> str:
     claim_url = voucher.get("claim_url", "https://shopee.vn")
     shop_scope = get_voucher_shop_scope(voucher)
     shop_line = f"🏪 <b>Áp dụng:</b> Chỉ Shop {shop_scope}\n" if shop_scope else ""
+    time_str = format_voucher_time(voucher)
     return (
         f"⚡️ <b>[MÃ HỒI SINH - VỪA CÓ LƯỢT]</b>\n\n"
         f"🏷 <b>Mã:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n"
         f"📦 <b>Ưu đãi:</b> {voucher.get('title')}\n"
+        f"⏰ <b>Hiệu lực:</b> {time_str}\n"
         f"{shop_line}"
         f"🔗 <a href=\"{claim_url}\">Vào Shopee nhập mã ngay kẻo hết!</a>"
     )

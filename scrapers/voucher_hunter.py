@@ -3,12 +3,21 @@ Module Săn & Tổng Hợp Voucher Shopee Toàn Diện (Voucher Hunter Engine)
 CHUẨN SẢN XUẤT: TẬP TRUNG MÃ NHẬP TAY (PROMO CODE), MÃ ẨN ĐỘC QUYỀN, ZERO FREESHIP, GỌN GÀNG
 """
 
+from datetime import datetime, timedelta
+
 def get_comprehensive_voucher_catalog():
     """
     Kho mã giảm giá Shopee đầy đủ mã nhập tay (code) và mã ẩn độc quyền.
     Người dùng chỉ cần chạm vào mã để sao chép và dán vào ô Shopee Voucher.
+    Có thời gian hiệu lực và thời điểm kết thúc rõ ràng.
     """
-    return [
+    now = datetime.now()
+    d_str = now.strftime("%d/%m")
+    today_start = f"00:00 ngày {d_str}"
+    today_end = f"23:59 ngày {d_str}"
+    next_day_end = f"23:59 ngày {(now + timedelta(days=1)).strftime('%d/%m')}"
+
+    catalog = [
         # --- 0. MÃ ẨN ĐẶC BIỆT: SIÊU HỘI SHOPEE (ĐƠN TỪ 0Đ GIẢM SÂU TRỰC TIẾP) ---
         {
             "voucher_id": "SP_AN_SIEUHOI_110K",
@@ -21,6 +30,8 @@ def get_comprehensive_voucher_catalog():
             "discount_value": 110000,
             "max_discount_amount": 110000,
             "min_spend": 0,
+            "start_time": today_start,
+            "end_time": f"{today_end} (Sắp hết lượt)",
             "claim_url": "https://shopee.vn/m/ma-giam-gia",
             "guide": "Vào giỏ hàng, dán mã SIEUHOISHOPEEOCTR vào ô 'Shopee Voucher' để giảm ngay 110k.",
             "is_hidden": 1,
@@ -38,6 +49,8 @@ def get_comprehensive_voucher_catalog():
             "discount_value": 100000,
             "max_discount_amount": 100000,
             "min_spend": 0,
+            "start_time": today_start,
+            "end_time": today_end,
             "claim_url": "https://shopee.vn/m/ma-giam-gia",
             "guide": "Nhập mã SIEUHOI100K tại ô Shopee Voucher khi thanh toán đơn từ 0đ.",
             "is_hidden": 1,
@@ -55,6 +68,8 @@ def get_comprehensive_voucher_catalog():
             "discount_value": 150000,
             "max_discount_amount": 150000,
             "min_spend": 350000,
+            "start_time": today_start,
+            "end_time": next_day_end,
             "claim_url": "https://shopee.vn/m/ma-giam-gia",
             "guide": "Nhập mã SIEUHOI150K khi thanh toán đơn từ 350k.",
             "is_hidden": 1,
@@ -72,6 +87,8 @@ def get_comprehensive_voucher_catalog():
             "discount_value": 70000,
             "max_discount_amount": 70000,
             "min_spend": 0,
+            "start_time": today_start,
+            "end_time": today_end,
             "claim_url": "https://shopee.vn/m/ma-giam-gia",
             "guide": "Nhập OCTSALE70K tại bước thanh toán để giảm ngay 70k.",
             "is_hidden": 1,
@@ -302,3 +319,9 @@ def get_comprehensive_voucher_catalog():
             "status": "ACTIVE"
         }
     ]
+
+    for v in catalog:
+        v.setdefault("start_time", today_start)
+        v.setdefault("end_time", today_end)
+
+    return catalog
