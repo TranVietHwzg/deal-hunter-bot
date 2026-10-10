@@ -1,122 +1,103 @@
 import asyncio
-import hashlib
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict, Any
 
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
-from core import database, calculator
-from scrapers import shopee, voucher_hunter
-from app.connectors.shopee_connector import ShopeeConnector
-from app.core.restock_radar import RestockRadar
 
-shopee_conn = ShopeeConnector()
-restock_radar = RestockRadar()
+from repositories.voucher_repository import VoucherRepository
+from repositories.shop_repository import ShopRepository
+from repositories.scan_repository import ScanRepository
+from services.discovery_service import DiscoveryService
+from services.lifecycle_service import LifecycleService
+from models.scan_run import ScanMode
+from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+
+voucher_repo = VoucherRepository()
+shop_repo = ShopRepository()
+scan_repo = ScanRepository()
+discovery_service = DiscoveryService(voucher_repo, scan_repo)
+lifecycle_service = LifecycleService(voucher_repo, scan_repo)
 
 async def seed_default_vouchers():
-    """Nạp và đồng bộ kho voucher Shopee chất lượng cao (Bài trừ 100% Freeship)"""
-    # 1. Từ danh mục chuẩn
-    catalog = voucher_hunter.get_comprehensive_voucher_catalog()
-    for v in catalog:
-        database.upsert_voucher(v)
+    """Đồng bộ ban đầu kho voucher Shopee chiến dịch & mã ẩn"""
+    await discovery_service.run_scan(ScanMode.AUTO)
+    print("[Radar] Đã nạp thành công kho mã Shopee ban đầu (ZERO FREESHIP).")
 
-    # 2. Từ Shopee Connector
-    await shopee_conn.fetch_vouchers()
-    print(f"[Scanner] Đã đồng bộ kho voucher Shopee sạch (ZERO FREESHIP) thành công.")
+async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
+    """Chạy một chu kỳ Radar hoàn chỉnh (Discovery + Lifecycle check)"""
+    # 1. Quét khám phá nguồn Shopee công khai
+    scan_res = await discovery_service.run_scan(ScanMode.AUTO)
 
-async def run_scan_cycle(bot_instance=None):
-    """Quét 1 chu kỳ đối soát giá toàn bộ sản phẩm và kho voucher"""
-    await seed_default_vouchers()
-    vouchers = database.get_vouchers()
-    
-    # 1. TỰ ĐỘNG BẮN CẢNH BÁO MÃ ẨN & VOUCHER XỊN (KHÔNG CẦN CHỜ SP ĐẠT GIÁ)
+    # 2. Gửi thông báo cho các voucher mới phát hiện
     if bot_instance:
-        # Ưu tiên số 1: Quét và gửi ngay các MÃ ẨN NHẬP TAY (như SIEUHOISHOPEEOCTR, Siêu Hội Shopee...)
-        hidden_vouchers = database.get_vouchers(hidden_only=True)
-        for hv in hidden_vouchers:
-            await bot_instance.broadcast_hot_alert(hv)
+        for ev in scan_res.get("events_to_notify", []):
+            ev_type = ev.get("type")
+            v = ev.get("voucher")
+            if not v:
+                continue
+            if ev_type in ("UPCOMING_KNOWN", "UPCOMING_UNKNOWN"):
+                await bot_instance.broadcast_upcoming_voucher(v)
+            elif ev_type == "ACTIVE_NEW":
+                await bot_instance.broadcast_active_voucher(v)
+            elif ev_type == "CODE_REVEALED":
+                await bot_instance.broadcast_code_revealed(v)
 
-        # Ưu tiên số 2: Các voucher HOT khác
-        hot_vouchers = database.get_vouchers(hot_only=True)
-        for hv in hot_vouchers:
-            await bot_instance.broadcast_hot_alert(hv)
+    # 3. Chạy Lifecycle Check (chuyển ACTIVE, nhắc giờ T-15m / T-2m)
+    lifecycle_notifs = lifecycle_service.run_lifecycle_cycle()
+    if bot_instance:
+        for item in lifecycle_notifs:
+            itype = item.get("type")
+            v = item.get("voucher")
+            if not v:
+                continue
+            if itype == "VOUCHER_OPENED":
+                await bot_instance.broadcast_active_voucher(v)
+            elif itype in ("REMINDER_15M", "REMINDER_2M"):
+                await bot_instance.broadcast_reminder(v, itype)
 
-        # Kiểm tra mã hồi sinh (Restock)
-        for v in vouchers:
-            r_event = restock_radar.update_and_detect_restock(v.get("id"), v.get("status"), v.get("quality_score", 0))
-            if r_event and r_event.get("is_urgent_alert"):
-                from app.bot.templates import format_restock_alert
-                await bot_instance.send_message(format_restock_alert(v))
+    return scan_res
 
-    ready_count = 0
-    products = database.get_all_products()
-    for p in products:
-        try:
-            shop_id = p.get("shop_id")
-            item_id = p.get("item_id") or p.get("item_id_on_platform")
-            
-            # 1. Cập nhật giá mới nhất
-            item_data = await shopee.fetch_shopee_item(shop_id, item_id)
-            current_price = item_data.get("price", p.get("current_price", 0))
-            p["current_price"] = current_price
-            
-            # 2. Tính gộp mã qua Stacking Engine chuẩn (Không freeship)
-            eval_res = calculator.stack_vouchers_and_evaluate(p, vouchers, min_discount_threshold=15)
-            
-            # 3. Cập nhật vào SQLite
-            database.update_product_evaluation(
-                item_id=item_id,
-                current_price=eval_res["current_price"],
-                final_price=eval_res["final_price"],
-                discount_percent=eval_res["discount_percent"],
-                is_deal_ready=1 if eval_res["is_deal_ready"] else 0,
-                applied_vouchers=eval_res["applied_vouchers"]
-            )
-            
-            # 4. Kiểm tra điều kiện bắn cảnh báo Telegram
-            if eval_res["is_deal_ready"]:
-                ready_count += 1
-                if bot_instance:
-                    # Tạo SHA-256 dedup hash
-                    raw_hash = f"DEAL_{item_id}_{int(eval_res['final_price'])}_{eval_res['discount_percent']}"
-                    dedup_hash = hashlib.sha256(raw_hash.encode("utf-8")).hexdigest()
-                    
-                    if not database.is_alert_duplicate(dedup_hash):
-                        await bot_instance.send_deal_alert(p, eval_res, alert_reason="DEAL_MOI")
-                        database.record_alert_event(
-                            alert_type="TARGET_MET",
-                            dedup_hash=dedup_hash,
-                            message_payload=f"Deal {p['name']}",
-                            product_id=item_id,
-                            final_price=eval_res["final_price"]
-                        )
-                        print(f"[Scanner] Đã gửi cảnh báo deal chuẩn: {p['name'][:30]} (-{eval_res['discount_percent']}%)")
-                        
-            await asyncio.sleep(1.0)
-        except Exception as e:
-            print(f"[Scanner] Lỗi quét sản phẩm #{p.get('id')}: {e}")
-            
-    return ready_count
-
-async def background_scanner_loop(bot_instance, config):
+def calculate_adaptive_interval() -> int:
     """
-    Vòng lặp quét tự động thích ứng (Adaptive Scheduler):
-    - Bình thường: 30s/lần
-    - Khung giờ vàng sale (0h, 9h, 12h, 21h): Tăng tần suất quét
+    Tính toán khoảng thời gian ngủ thích ứng (Adaptive Interval):
+    - Có mã sắp mở trong < 30 phút: quét mỗi 5 phút (300s)
+    - Có mã sắp mở trong < 24 giờ: quét mỗi 15 phút (900s)
+    - Bình thường: quét mỗi 60 phút (3600s)
     """
-    print("[Scanner] Khởi động luồng quét tự động thích ứng...")
-    normal_sleep = config.get("settings", {}).get("normal_interval_seconds", 30)
-    turbo_sleep = config.get("settings", {}).get("turbo_interval_seconds", 5)
-    
+    upcoming = voucher_repo.get_upcoming_vouchers(days=1)
+    if not upcoming:
+        return 3600
+
+    now = datetime.now(VN_TZ)
+    min_diff = None
+    for v in upcoming:
+        dt = parse_vietnam_time(v.start_time)
+        if dt and dt > now:
+            diff = (dt - now).total_seconds()
+            if min_diff is None or diff < min_diff:
+                min_diff = diff
+
+    if min_diff is not None:
+        if min_diff <= 30 * 60:
+            return 300  # 5 phút
+        elif min_diff <= 24 * 3600:
+            return 900  # 15 phút
+
+    return 3600
+
+async def background_radar_loop(bot_instance=None):
+    """Vòng lặp chạy nền của Radar với tần suất thích ứng"""
+    print("[Radar Scheduler] Khởi động tiến trình theo dõi mã sắp mở Shopee 24/7...")
     while True:
         try:
-            is_peak = restock_radar.is_peak_sale_hour()
-            await run_scan_cycle(bot_instance)
-            sleep_duration = turbo_sleep if is_peak else normal_sleep
-            await asyncio.sleep(sleep_duration)
+            await run_radar_cycle(bot_instance)
         except Exception as e:
-            print(f"[Scanner Loop Error]: {e}")
-            await asyncio.sleep(10)
+            print(f"[Radar Scheduler Error] Lỗi chu kỳ quét: {e}")
+
+        interval = calculate_adaptive_interval()
+        await asyncio.sleep(interval)

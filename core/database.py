@@ -334,6 +334,18 @@ def init_db():
     conn.commit()
     conn.close()
 
+    # Khởi tạo các bảng mở rộng mới (voucher_changes, tracked_shops, notification_events, scan_runs)
+    try:
+        from repositories.voucher_repository import VoucherRepository
+        from repositories.shop_repository import ShopRepository
+        from repositories.scan_repository import ScanRepository
+        VoucherRepository().init_schema()
+        ShopRepository().init_schema()
+        ScanRepository().init_schema()
+    except Exception as e:
+        print(f"[Database] Lưu ý khi tạo schema mở rộng: {e}")
+
+
 # ----------------- CÁC HÀM TRUY XUẤT VOUCHER & PRODUCT -----------------
 
 def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
