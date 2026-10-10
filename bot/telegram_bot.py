@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import httpx
 from core import database, calculator
 from scrapers import shopee
@@ -86,6 +87,12 @@ class TelegramDealBot:
         await self.send_photo(img, msg, reply_markup=buttons)
 
     def get_main_menu_keyboard(self):
+        render_url = os.environ.get("RENDER_EXTERNAL_URL")
+        if render_url and render_url.startswith("http"):
+            web_btn = [{"text": "🌐 Mở Web Dashboard", "url": render_url}]
+        else:
+            web_btn = [{"text": "🌐 Hướng Dẫn Mở Web Dashboard", "callback_data": "menu_web_info"}]
+
         return {
             "inline_keyboard": [
                 [
@@ -100,9 +107,7 @@ class TelegramDealBot:
                     {"text": "⚙️ Ngưỡng Giảm Giá (≥30%)", "callback_data": "menu_settings"},
                     {"text": "📊 Thống Kê Bot", "callback_data": "menu_status"}
                 ],
-                [
-                    {"text": "🌐 Mở Web Dashboard (Port 8000)", "url": "http://localhost:8000"}
-                ]
+                web_btn
             ]
         }
 
@@ -185,17 +190,27 @@ class TelegramDealBot:
             kb = {"inline_keyboard": [[{"text": "⬅️ Quay Lại Menu", "callback_data": "menu_main"}]]}
             await self.send_message(text, reply_markup=kb)
 
-        elif data == "menu_status":
-            stats = database.get_stats()
+        elif data == "menu_settings":
             text = (
-                "📊 <b>TRẠNG THÁI HỆ THỐNG:</b>\n\n"
-                "• 🟢 Bot Status: Hoạt động bình thường\n"
-                "• ⏱ Chu kỳ quét: 30s (Tự động kích hoạt Turbo 2s trước giờ vàng)\n"
-                "• 🛡 An toàn: Session khách (Không dùng cookie tài khoản cá nhân)\n"
-                f"• 📦 Đang canh: {stats['total_products']} sản phẩm\n"
-                f"• 🎯 Đạt mục tiêu: {stats['ready_deals']} sản phẩm\n"
-                "• 🌐 Web Dashboard: http://localhost:8000\n"
+                "⚙️ <b>CÀI ĐẶT NGƯỠNG GIẢM GIÁ:</b>\n\n"
+                "• Ngưỡng lọc hiện tại: <b>≥ 30%</b>\n"
+                "• Mọi deal giảm dưới 30% sẽ bị tự động loại bỏ để chống spam.\n\n"
+                "<i>Để đổi ngưỡng, bạn gửi lệnh:</i>\n"
+                "<code>/min_discount 35</code> (đổi thành 35%)\n"
             )
+            kb = {"inline_keyboard": [[{"text": "⬅️ Quay Lại Menu", "callback_data": "menu_main"}]]}
+            await self.send_message(text, reply_markup=kb)
+
+        elif data == "menu_web_info":
+            render_url = os.environ.get("RENDER_EXTERNAL_URL")
+            text = (
+                "🌐 <b>HƯỚNG DẪN MỞ WEB DASHBOARD:</b>\n\n"
+                "• <b>Nếu chạy trên máy tính:</b> Mở trình duyệt vào <code>http://localhost:8000</code>\n"
+            )
+            if render_url:
+                text += f"• <b>Link Web Render của bạn:</b> {render_url}\n"
+            else:
+                text += "• <b>Nếu chạy trên Render:</b> Mở đường link onrender.com của bạn.\n"
             kb = {"inline_keyboard": [[{"text": "⬅️ Quay Lại Menu", "callback_data": "menu_main"}]]}
             await self.send_message(text, reply_markup=kb)
 
