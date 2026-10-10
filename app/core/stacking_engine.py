@@ -55,7 +55,9 @@ def calculate_stacked_price(
                 "type": "SHOP_VOUCHER",
                 "id": shop_voucher.get("id") or shop_voucher.get("voucher_id_on_platform"),
                 "title": shop_voucher.get("title", "Voucher Shop"),
-                "discount_deducted": d_shop
+                "discount_deducted": d_shop,
+                "shop_name": shop_voucher.get("shop_name"),
+                "shop_id": shop_voucher.get("shop_id")
             })
 
     price_after_shop = price_after_direct - d_shop

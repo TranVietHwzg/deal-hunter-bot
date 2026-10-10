@@ -388,6 +388,8 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
         discount_value=excluded.discount_value,
         max_discount_amount=excluded.max_discount_amount,
         min_spend=excluded.min_spend,
+        shop_id=excluded.shop_id,
+        shop_name=excluded.shop_name,
         claim_url=excluded.claim_url,
         guide=excluded.guide,
         status=excluded.status,

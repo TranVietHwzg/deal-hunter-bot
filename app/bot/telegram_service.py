@@ -11,7 +11,7 @@ from config.feature_flags import feature_flags
 from app.core.scoring_engine import calculate_voucher_quality_score
 from app.core.stacking_engine import calculate_stacked_price
 from app.core.junk_filter import is_freeship, validate_voucher
-from app.bot.templates import format_hot_voucher_alert, format_restock_alert
+from app.bot.templates import format_hot_voucher_alert, format_restock_alert, get_voucher_shop_scope
 from core import database, calculator
 from app.connectors.shopee_connector import ShopeeConnector
 
@@ -477,6 +477,8 @@ class TelegramBotService:
             await self._cmd_stack(args)
         elif cmd == "/history":
             await self._cmd_history(args)
+        elif cmd in ["/addvoucher", "/them_ma", "/ma"]:
+            await self._cmd_add_voucher(args)
         elif cmd == "/settings":
             await self._cmd_settings()
         else:
@@ -489,7 +491,8 @@ class TelegramBotService:
             "✨ <b>BẠN CÓ THỂ LÀM GÌ:</b>\n"
             "• <b>Dán thẳng link Shopee vào đây</b> để bắt đầu canh giá tự động.\n"
             "• Hệ thống <b>tự động bắn tin</b> khi có Voucher HOT hoặc sản phẩm đạt giá.\n"
-            "• Gộp mã đa tầng: Shop + Toàn sàn + Video/Live.\n\n"
+            "• Gộp mã đa tầng: Shop + Toàn sàn + Video/Live.\n"
+            "• Thêm mã giảm thủ công: <code>/addvoucher &lt;mã&gt; &lt;giảm&gt; [đơn_tt] [tên_shop]</code>\n\n"
             "👇 <b>Bấm các nút dưới đây để thao tác nhanh:</b>"
         )
         buttons = self.get_main_menu_keyboard()
@@ -622,10 +625,14 @@ class TelegramBotService:
             code = v.get("voucher_code") or "LƯU BANNER"
             is_hid = "🔑 [MÃ ẨN] " if v.get("is_hidden") == 1 else "🏷 "
             
+            shop_scope = get_voucher_shop_scope(v)
+            shop_str = f"   🏪 <i>Chỉ áp dụng: Shop {shop_scope}</i>\n" if shop_scope else ""
+            
             body += (
                 f"{i}. {is_hid}<code>{code}</code>\n"
                 f"   💰 <b>{d_str}</b> ({min_sp})\n"
-                f"   📦 {v.get('category') or 'Toàn sàn'}\n\n"
+                f"   📦 {v.get('category') or 'Toàn sàn'}\n"
+                f"{shop_str}\n"
             )
 
         body += "👉 <i>Chạm vào mã chữ in đậm để sao chép nhanh rồi dán vào giỏ hàng Shopee!</i>"
@@ -652,11 +659,14 @@ class TelegramBotService:
             return
 
         code = voucher.get("voucher_code") or "LƯU BANNER"
+        shop_scope = get_voucher_shop_scope(voucher)
+        shop_line = f"• <b>Áp dụng:</b> Chỉ Shop {shop_scope}\n" if shop_scope else ""
         msg = (
             f"🏷 <b>MÃ GIẢM GIÁ:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n\n"
             f"• <b>Tên ưu đãi:</b> {voucher.get('title')}\n"
             f"• <b>Đơn tối thiểu:</b> {int(voucher.get('min_spend', 0)):,}đ\n"
-            f"• <b>Áp dụng:</b> {voucher.get('category') or 'Toàn sàn'}\n"
+            f"• <b>Phạm vi:</b> {voucher.get('category') or 'Toàn sàn'}\n"
+            f"{shop_line}"
             f"• <b>Cách dùng:</b> {voucher.get('guide') or 'Nhập mã vào ô Shopee Voucher khi thanh toán.'}"
         )
         buttons = {
@@ -698,12 +708,15 @@ class TelegramBotService:
             category_live_voucher=cat_v
         )
 
+        shop_scope = get_voucher_shop_scope(shop_v) if shop_v else None
+        shop_label = f" (Shop {shop_scope})" if shop_scope else ""
+
         msg = (
             f"🧮 <b>MÔ PHỎNG VOUCHER STACKING (GIÁ THỰC TRẢ)</b>\n\n"
             f"📦 <b>Sản phẩm:</b> {details.get('name')}\n"
             f"💵 <b>Giá gốc:</b> {int(res['original_price']):,}đ\n"
             f"➖ Giảm trực tiếp Shop: -{int(res['applied_breakdown']['shop_direct']):,}đ\n"
-            f"➖ Voucher Shop: -{int(res['applied_breakdown']['shop_voucher']):,}đ\n"
+            f"➖ Voucher Shop{shop_label}: -{int(res['applied_breakdown']['shop_voucher']):,}đ\n"
             f"➖ Voucher Sàn: -{int(res['applied_breakdown']['platform_voucher']):,}đ\n"
             f"➖ Voucher Live/Ngành: -{int(res['applied_breakdown']['category_live_voucher']):,}đ\n"
             f"➖➖➖➖➖➖➖➖➖➖\n"
@@ -716,6 +729,114 @@ class TelegramBotService:
             "inline_keyboard": [
                 [{"text": "🛒 Bấm Mua Ngay", "url": details.get("product_url", "https://shopee.vn")}],
                 [{"text": "📋 Xem Watchlist", "callback_data": "menu_list"}, {"text": "🏠 Menu Chính", "callback_data": "menu_home"}]
+            ]
+        }
+        await self.send_message(msg, reply_markup=buttons)
+
+    async def _cmd_add_voucher(self, args: List[str]):
+        """
+        Thêm mã giảm giá thủ công:
+        Cú pháp:
+        - Toàn ngành / Toàn sàn (không cần ghi shop): /addvoucher <MÃ> <MỨC_GIẢM> [ĐƠN_TỐI_THIỂU]
+          Ví dụ: /addvoucher SALE100K 100k 400k
+        - Chỉ cho 1 Shop: /addvoucher <MÃ> <MỨC_GIẢM> [ĐƠN_TỐI_THIỂU] [TÊN_SHOP]
+          Ví dụ: /addvoucher YONEX50K 50k 300k Yonex Official Store
+        """
+        if len(args) < 2:
+            guide = (
+                "⚠️ <b>Cú pháp thêm mã giảm giá:</b>\n\n"
+                "1. <b>Mã toàn ngành / toàn sàn:</b>\n"
+                "<code>/addvoucher &lt;mã&gt; &lt;mức_giảm&gt; [đơn_tối_thiểu]</code>\n"
+                "<i>Ví dụ: <code>/addvoucher SALE100K 100k 400k</code></i>\n\n"
+                "2. <b>Mã chỉ áp dụng cho 1 Shop:</b>\n"
+                "<code>/addvoucher &lt;mã&gt; &lt;mức_giảm&gt; [đơn_tối_thiểu] &lt;tên_shop&gt;</code>\n"
+                "<i>Ví dụ: <code>/addvoucher YONEX50K 50k 300k Yonex Official Store</code></i>"
+            )
+            await self.send_message(guide)
+            return
+
+        code = args[0].strip().upper()
+        raw_discount = args[1].strip()
+
+        # Parse discount
+        d_type = "FIXED_AMOUNT"
+        max_discount = 0.0
+        if "%" in raw_discount:
+            d_type = "PERCENTAGE"
+            m_pct = re.search(r'(\d+)', raw_discount)
+            d_val = float(m_pct.group(1)) if m_pct else 15.0
+            max_discount = d_val * 10000.0
+        else:
+            parsed_d = self._parse_price_from_text(raw_discount)
+            d_val = parsed_d if parsed_d else 50000.0
+            max_discount = d_val
+
+        # Parse min spend & shop
+        min_spend = 0.0
+        shop_name = None
+        if len(args) >= 3:
+            parsed_min = self._parse_price_from_text(args[2])
+            if parsed_min is not None:
+                min_spend = parsed_min
+                if len(args) >= 4:
+                    shop_name = " ".join(args[3:]).strip()
+            else:
+                shop_name = " ".join(args[2:]).strip()
+
+        # Xác định phạm vi áp dụng: nếu là toàn ngành / toàn sàn thì không ghi
+        is_shop_voucher = False
+        if shop_name:
+            clean_shop = shop_name.lower().replace("shop", "").strip()
+            if clean_shop in ["toàn sàn", "toàn ngành", "toan san", "toan nganh", "mọi shop", "all"]:
+                shop_name = None
+                v_type = "PLATFORM"
+                cat = "Toàn sàn"
+            else:
+                is_shop_voucher = True
+                v_type = "SHOP"
+                cat = "Voucher Shop"
+        else:
+            v_type = "PLATFORM"
+            cat = "Toàn sàn"
+
+        v_data = {
+            "voucher_id": f"USER_{code}",
+            "voucher_id_on_platform": code,
+            "voucher_code": code,
+            "voucher_type": v_type,
+            "category": cat,
+            "title": f"Mã nhập: {code} (-{int(d_val)}{'%' if d_type == 'PERCENTAGE' else 'đ'})",
+            "description": "Mã do người dùng thêm",
+            "discount_type": d_type,
+            "discount_value": d_val,
+            "max_discount_amount": max_discount,
+            "min_spend": min_spend,
+            "shop_id": "0" if not is_shop_voucher else "USER_SHOP",
+            "shop_name": shop_name,
+            "claim_url": "https://shopee.vn/m/ma-giam-gia",
+            "guide": f"Nhập mã {code} tại bước thanh toán.",
+            "is_hidden": 1,
+            "status": "ACTIVE"
+        }
+
+        database.upsert_voucher(v_data)
+
+        d_str = f"Giảm {int(d_val)}%" if d_type == "PERCENTAGE" else f"Giảm {int(d_val):,}đ"
+        min_str = f"Đơn từ {int(min_spend):,}đ" if min_spend > 0 else "Đơn từ 0đ"
+        shop_info = f"\n🏪 <b>Áp dụng:</b> Chỉ Shop <b>{shop_name}</b>" if is_shop_voucher else "\n📦 <b>Phạm vi:</b> Toàn ngành / Toàn sàn"
+
+        msg = (
+            f"✅ <b>ĐÃ THÊM MÃ GIẢM GIÁ THÀNH CÔNG!</b>\n\n"
+            f"🏷 <b>Mã:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n"
+            f"💰 <b>Mức giảm:</b> <b>{d_str}</b>\n"
+            f"🛒 <b>Điều kiện:</b> {min_str}"
+            f"{shop_info}\n\n"
+            f"💡 <i>Mã này đã được lưu vào kho và sẽ tự động đưa vào công thức tính gộp giá thực trả!</i>"
+        )
+        buttons = {
+            "inline_keyboard": [
+                [{"text": "🔑 Xem Danh Sách Mã", "callback_data": "menu_vouchers"}],
+                [{"text": "⚡️ Quét Đối Soát Ngay", "callback_data": "menu_check"}]
             ]
         }
         await self.send_message(msg, reply_markup=buttons)

@@ -117,6 +117,8 @@ class ShopeeConnector(BasePlatformConnector):
                 "discount_value": 100000,
                 "max_discount_amount": 100000,
                 "min_spend": 500000,
+                "shop_id": "88888",
+                "shop_name": "Gian hàng Mall chỉ định",
                 "claim_url": "https://shopee.vn/mall",
                 "guide": "Lưu trực tiếp ngay tại trang chủ gian hàng Shopee Mall của shop.",
                 "status": "ACTIVE",

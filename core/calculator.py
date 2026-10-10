@@ -95,7 +95,9 @@ def stack_vouchers_and_evaluate(product: Dict[str, Any], available_vouchers: Lis
             "code": av.get("id"),
             "label": f"{av.get('title')} (-{int(av.get('discount_deducted', 0)):,}đ)",
             "discount": av.get("discount_deducted"),
-            "type": av.get("type")
+            "type": av.get("type"),
+            "shop_name": av.get("shop_name"),
+            "shop_id": av.get("shop_id")
         })
 
     return {

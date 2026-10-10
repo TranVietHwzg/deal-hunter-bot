@@ -1,9 +1,41 @@
+import re
 from typing import Dict, Any, Optional
+
+def get_voucher_shop_scope(voucher: Dict[str, Any]) -> Optional[str]:
+    """
+    Xác định nguồn / gian hàng áp dụng của voucher:
+    - Nếu là voucher shop cụ thể: trả về tên shop / nguồn (ví dụ: 'DareU Official Store').
+    - Nếu là toàn ngành / toàn sàn / Shopee Live chung: trả về None (không cần ghi theo yêu cầu).
+    """
+    shop_name = (voucher.get("shop_name") or "").strip()
+    shop_id = (str(voucher.get("shop_id") or "")).strip()
+    voucher_type = str(voucher.get("voucher_type") or "").upper()
+    category = str(voucher.get("category") or "").lower()
+    title = str(voucher.get("title") or "")
+
+    # 1. Nếu có tên shop rõ ràng
+    if shop_name and shop_name.lower() not in ["none", "null", "toàn sàn", "toàn ngành", "mọi shop", "all"]:
+        return shop_name
+
+    # 2. Nếu là voucher loại SHOP
+    if voucher_type == "SHOP":
+        # Tìm xem có tên shop trong title không: "Shop DareU: ...", "DareU Official Store"
+        m = re.search(r'(?:shop|gian hàng)\s+([a-zA-Z0-9_\s\.\-]+?)(?:\s*[:\-]|\s+giảm|\s+đơn|$)', title, re.IGNORECASE)
+        if m:
+            found_name = m.group(1).strip()
+            if found_name and found_name.lower() not in ["official", "mall", "toàn sàn", "toàn ngành"]:
+                return found_name
+        if shop_id and shop_id not in ["0", "", "none"]:
+            return f"Shop ID {shop_id}"
+        return "Gian hàng chỉ định"
+
+    # 3. Các loại toàn ngành / toàn sàn: PLATFORM, CATEGORY, LIVE_VIDEO... không ghi thông tin shop
+    return None
 
 def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[Dict[str, Any]] = None) -> str:
     """
     Mẫu cảnh báo voucher gọn gàng, làm nổi bật mã nhập tay / mã ẩn để chạm sao chép.
-    Bỏ hoàn toàn việc tính điểm phức tạp.
+    Nếu áp dụng cho shop cụ thể: ghi rõ shop. Nếu toàn ngành / toàn sàn: không ghi.
     """
     platform = str(voucher.get("platform_id") or "SHOPEE").upper()
     title = voucher.get("title", "")
@@ -27,12 +59,16 @@ def format_hot_voucher_alert(voucher: Dict[str, Any], example_product: Optional[
 
     tag = "🔑 <b>[MÃ ẨN NHẬP TAY]</b>" if is_hidden else "🔥 <b>[VOUCHER HOT]</b>"
 
-    # Định dạng siêu gọn: 5 dòng cốt lõi
+    shop_scope = get_voucher_shop_scope(voucher)
+    shop_line = f"🏪 <b>Áp dụng:</b> Chỉ Shop {shop_scope}\n" if shop_scope else ""
+
+    # Định dạng siêu gọn: 5 dòng cốt lõi (chỉ thêm dòng shop nếu áp dụng cho shop cụ thể)
     msg = (
         f"{tag} — <b>[{platform}]</b>\n\n"
         f"🏷 <b>Mã nhập:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n"
         f"💰 <b>Mức giảm:</b> <b>{discount_str}</b>\n"
         f"🛒 <b>Điều kiện:</b> {min_spend_str} | {category}\n"
+        f"{shop_line}"
         f"🔗 <a href=\"{claim_url}\">Mở Shopee áp mã ngay</a>"
     )
     return msg
@@ -49,7 +85,9 @@ def format_deal_alert(product: Dict[str, Any], evaluation: Dict[str, Any]) -> st
     vouchers_str = ""
     for v in evaluation.get("applied_vouchers", []):
         code = v.get("code") or v.get("label", "")
-        vouchers_str += f"• <code>{code}</code>\n"
+        shop_scope = get_voucher_shop_scope(v)
+        shop_note = f" <i>(Chỉ Shop: {shop_scope})</i>" if shop_scope else ""
+        vouchers_str += f"• <code>{code}</code>{shop_note}\n"
 
     msg = (
         f"🚨 <b>[KÈO THƠM ĐẠT GIÁ]</b>\n\n"
@@ -67,9 +105,13 @@ def format_restock_alert(voucher: Dict[str, Any]) -> str:
     """Cảnh báo khi một mã vừa được mở thêm lượt"""
     code = voucher.get("voucher_code") or "LƯU TRÊN BANNER"
     claim_url = voucher.get("claim_url", "https://shopee.vn")
+    shop_scope = get_voucher_shop_scope(voucher)
+    shop_line = f"🏪 <b>Áp dụng:</b> Chỉ Shop {shop_scope}\n" if shop_scope else ""
     return (
         f"⚡️ <b>[MÃ HỒI SINH - VỪA CÓ LƯỢT]</b>\n\n"
         f"🏷 <b>Mã:</b> <code>{code}</code> <i>(chạm để sao chép)</i>\n"
         f"📦 <b>Ưu đãi:</b> {voucher.get('title')}\n"
+        f"{shop_line}"
         f"🔗 <a href=\"{claim_url}\">Vào Shopee nhập mã ngay kẻo hết!</a>"
     )
+
