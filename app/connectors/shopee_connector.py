@@ -153,7 +153,8 @@ class ShopeeConnector(BasePlatformConnector):
         item_id: str,
         shop_id: Optional[str] = None,
         name_hint: Optional[str] = None,
-        image_hint: Optional[str] = None
+        image_hint: Optional[str] = None,
+        price_hint: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """Lấy thông tin giá niêm yết và chiết khấu trực tiếp của sản phẩm"""
         if not shop_id:
@@ -172,8 +173,8 @@ class ShopeeConnector(BasePlatformConnector):
                         "item_id": str(item_id),
                         "shop_id": str(shop_id),
                         "name": data.get("name") or name_hint or f"Sản phẩm Shopee ({item_id})",
-                        "current_price": raw_price if raw_price > 0 else 500000.0,
-                        "original_price": raw_before_discount if raw_before_discount > 0 else raw_price,
+                        "current_price": raw_price if raw_price > 0 else (price_hint or 0.0),
+                        "original_price": raw_before_discount if raw_before_discount > 0 else (price_hint or raw_price),
                         "shop_direct_discount": max(0.0, raw_before_discount - raw_price) if raw_before_discount > raw_price else 0.0,
                         "image_url": f"https://down-vn.img.susercontent.com/file/{data.get('image', '')}" if data.get('image') else image_hint,
                         "product_url": f"https://shopee.vn/product/{shop_id}/{item_id}"
@@ -181,17 +182,18 @@ class ShopeeConnector(BasePlatformConnector):
             except Exception:
                 pass
 
-        # Fallback dữ liệu chuẩn nếu API công khai bị CDN rate-limit / WAF
+        # Tuyệt đối KHÔNG tự ý gán giá giả 650k/750k! Dùng đúng giá do người dùng chỉ định (price_hint).
+        real_p = float(price_hint) if price_hint and price_hint > 0 else 0.0
         return {
             "platform": "SHOPEE",
             "item_id": str(item_id),
-            "shop_id": str(shop_id or "88888"),
+            "shop_id": str(shop_id or "0"),
             "name": name_hint or f"Sản phẩm Shopee ({item_id})",
-            "current_price": 650000.0,
-            "original_price": 750000.0,
-            "shop_direct_discount": 100000.0,
+            "current_price": real_p,
+            "original_price": real_p,
+            "shop_direct_discount": 0.0,
             "image_url": image_hint or "https://deo.shopeemobile.com/shopee/shopee-pcmall-live-sg/assets/icon_favicon_1_32.png",
-            "product_url": f"https://shopee.vn/product/{shop_id or '88888'}/{item_id}"
+            "product_url": f"https://shopee.vn/product/{shop_id or '0'}/{item_id}"
         }
 
     @staticmethod

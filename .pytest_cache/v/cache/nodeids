@@ -18,5 +18,8 @@
   "tests/test_scoring.py::test_penalties_applied",
   "tests/test_stacking.py::test_four_tier_stacking_calculation",
   "tests/test_stacking.py::test_stacking_percentage_and_max_ceiling",
-  "tests/test_stacking.py::test_zero_freeship_invariance"
+  "tests/test_stacking.py::test_zero_freeship_invariance",
+  "tests/test_target_price_flow.py::test_direct_link_with_target_price[asyncio]",
+  "tests/test_target_price_flow.py::test_price_parsing_helper",
+  "tests/test_target_price_flow.py::test_two_step_link_then_price_flow[asyncio]"
 ]

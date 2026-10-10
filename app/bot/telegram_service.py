@@ -23,6 +23,59 @@ class TelegramBotService:
         self.is_running = False
         self.last_update_id = 0
         self.shopee_connector = ShopeeConnector()
+        self.pending_price_input: Dict[str, Dict[str, Any]] = {}
+
+    @staticmethod
+    def _parse_price_from_text(text: str) -> Optional[float]:
+        """Trích xuất giá tiền thông minh: 100k, 95k, 95.000đ, 95000, 1.5tr, 15tr, v.v."""
+        if not text:
+            return None
+        clean = text.lower().replace(" ", "").replace("đ", "").replace("vnd", "")
+        
+        # Triệu / tr / m
+        m_tr = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:tr|trieu|m)', clean)
+        if m_tr:
+            try:
+                return float(m_tr.group(1).replace(",", ".")) * 1_000_000
+            except ValueError:
+                pass
+
+        # k / nghìn
+        m_k = re.search(r'(\d+(?:[.,]\d+)?)\s*k', clean)
+        if m_k:
+            try:
+                return float(m_k.group(1).replace(",", ".")) * 1_000
+            except ValueError:
+                pass
+
+        # Dạng số có dấu chấm/phẩy: 95.000 hoặc 100,000
+        m_dots = re.search(r'(\d{1,3}(?:[.,]\d{3})+)', clean)
+        if m_dots:
+            raw_num = m_dots.group(1).replace(".", "").replace(",", "")
+            try:
+                return float(raw_num)
+            except ValueError:
+                pass
+
+        # Dạng số nguyên thuần túy (từ 1.000 đến 1 tỷ)
+        m_pure = re.findall(r'\b\d{4,10}\b', clean)
+        if m_pure:
+            try:
+                return float(m_pure[0])
+            except ValueError:
+                pass
+
+        # Người dùng chỉ gõ số nhỏ (VD: 95 hoặc 120)
+        m_small = re.findall(r'\b\d{2,3}\b', clean)
+        if m_small and (len(text.strip()) <= 5):
+            try:
+                val = float(m_small[0])
+                if val <= 500:
+                    return val * 1000
+            except ValueError:
+                pass
+
+        return None
 
     async def send_message(self, text: str, reply_markup=None, parse_mode="HTML") -> Optional[Dict[str, Any]]:
         payload = {
@@ -169,13 +222,11 @@ class TelegramBotService:
 
     # ----------------- NHẬN DIỆN & THÊM LINK TRỰC TIẾP -----------------
 
-    async def handle_direct_link(self, text: str) -> bool:
+    async def handle_direct_link(self, text: str, user_chat_id: Optional[str] = None) -> bool:
         """
-        Tự động nhận diện khi người dùng dán link Shopee vào khung chat (kể cả không gõ lệnh /watch)
-        Ví dụ:
-        - https://shopee.vn/product/88888/12345678
-        - https://vn.shp.ee/abcxyz 35%
-        - https://shopee.vn/... 450k
+        Tự động nhận diện khi người dùng dán link Shopee vào khung chat.
+        - Nếu có kèm giá muốn đạt được (VD: link 100k): Lưu ngay mục tiêu, tuyệt đối KHÔNG gán giá giả 750k.
+        - Nếu chỉ gửi mỗi link trần: Hỏi người dùng mức giá muốn đạt được.
         """
         match = re.search(r'(https?://[^\s]+)', text)
         if not match:
@@ -194,106 +245,95 @@ class TelegramBotService:
             await self.send_message("❌ Không nhận diện được mã sản phẩm từ link Shopee này. Vui lòng kiểm tra lại link.")
             return True
 
-        # Trích xuất mục tiêu giá nếu có kèm theo trong tin nhắn
+        # Trích xuất giá muốn đạt được nếu có kèm theo trong tin nhắn (VD: link 100k hoặc link 95000)
         remainder = text.replace(match.group(1), "").strip()
-        target_val = 30.0 # Mặc định giảm 30%
-        target_mode = "PERCENT"
+        target_price = self._parse_price_from_text(remainder)
 
-        if remainder:
-            clean_rem = remainder.lower().replace(",", "").replace(".", "").replace("đ", "")
-            if "%" in clean_rem:
-                try:
-                    pct = float(re.findall(r'\d+', clean_rem)[0])
-                    target_mode = "PERCENT"
-                    target_val = pct
-                except Exception:
-                    pass
-            elif "k" in clean_rem:
-                try:
-                    val_k = float(re.findall(r'\d+', clean_rem)[0]) * 1000
-                    target_mode = "PRICE"
-                    target_val = val_k
-                except Exception:
-                    pass
-            else:
-                digits = re.findall(r'\d+', clean_rem)
-                if digits:
-                    val_num = float(digits[0])
-                    if val_num <= 100:
-                        target_mode = "PERCENT"
-                        target_val = val_num
-                    else:
-                        target_mode = "PRICE"
-                        target_val = val_num
-
-        # Lấy thông tin chi tiết từ Shopee
         details = await self.shopee_connector.fetch_product_details(
             item_id,
             shop_id,
             name_hint=parsed.get("name"),
-            image_hint=parsed.get("image_url")
+            image_hint=parsed.get("image_url"),
+            price_hint=target_price
         )
         name = details.get("name", f"Sản phẩm {item_id}")
-        base_price = details.get("original_price") or details.get("current_price", 500000.0)
+        img = details.get("image_url")
 
-        # Lưu vào Database
-        database.add_product(
-            item_id=item_id,
-            shop_id=shop_id,
-            name=name,
-            url=raw_url,
-            image_url=details.get("image_url"),
-            target_mode=target_mode,
-            target_value=target_val,
-            baseline_price=base_price
-        )
+        # TRƯỜNG HỢP 1: Người dùng CÓ kèm giá muốn đạt được (Ví dụ: link 100k, link 95000)
+        if target_price and target_price > 0:
+            database.add_product(
+                item_id=item_id,
+                shop_id=shop_id,
+                name=name,
+                url=raw_url,
+                image_url=img,
+                target_mode="PRICE",
+                target_value=target_price,
+                baseline_price=target_price
+            )
 
-        # Tính toán giá gộp thử ngay lập tức
-        vouchers = database.get_vouchers(min_score=60)
-        p_obj = database.get_product_by_id(item_id)
-        eval_res = calculator.stack_vouchers_and_evaluate(p_obj, vouchers)
-        database.update_product_evaluation(
-            item_id=item_id,
-            current_price=eval_res["current_price"],
-            final_price=eval_res["final_price"],
-            discount_percent=eval_res["discount_percent"],
-            is_deal_ready=1 if eval_res["is_deal_ready"] else 0,
-            applied_vouchers=eval_res["applied_vouchers"]
-        )
+            database.update_product_evaluation(
+                item_id=item_id,
+                current_price=target_price,
+                final_price=target_price,
+                discount_percent=0,
+                is_deal_ready=0,
+                applied_vouchers=[]
+            )
 
-        target_str = f"giảm ≥ {target_val}%" if target_mode == "PERCENT" else f"giá ≤ {int(target_val):,}đ"
-        ready_icon = "🔥 ĐÃ ĐẠT GIÁ MUA!" if eval_res["is_deal_ready"] else "⏳ Đang theo dõi"
+            msg = (
+                f"✅ <b>ĐÃ THÊM SẢN PHẨM VÀO WATCHLIST!</b>\n\n"
+                f"📦 <b>{name}</b>\n"
+                f"🎯 <b>Giá muốn đạt được:</b> <b><u>≤ {int(target_price):,}đ</u></b>\n"
+                f"⏳ <b>Trạng thái:</b> Đang theo dõi voucher & đợt giảm giá...\n\n"
+                f"💡 <i>Bot sẽ bắn cảnh báo ngay khi phát hiện voucher giúp mua món này với giá ≤ {int(target_price):,}đ!</i>"
+            )
+
+            buttons = {
+                "inline_keyboard": [
+                    [
+                        {"text": "🎯 Đổi Giá Muốn Đạt", "callback_data": f"chtarget_{item_id}"},
+                        {"text": "🛒 Xem Trên Shopee", "url": details.get("product_url", raw_url)}
+                    ],
+                    [
+                        {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
+                        {"text": "❌ Hủy Canh Món Này", "callback_data": f"del_{item_id}"}
+                    ]
+                ]
+            }
+
+            if img:
+                await self.send_photo(img, msg, reply_markup=buttons)
+            else:
+                await self.send_message(msg, reply_markup=buttons)
+            return True
+
+        # TRƯỜNG HỢP 2: Người dùng CHỈ GỬI LINK (Chưa kèm giá muốn đạt được)
+        # Lưu vào trạng thái chờ nhập giá, KHÔNG tự ý gán giá giả định!
+        chat_key = str(user_chat_id or self.chat_id)
+        self.pending_price_input[chat_key] = {
+            "action": "new_product",
+            "item_id": item_id,
+            "shop_id": shop_id,
+            "name": name,
+            "url": raw_url,
+            "image_url": img
+        }
 
         msg = (
-            f"✅ <b>ĐÃ THÊM SẢN PHẨM VÀO WATCHLIST!</b>\n\n"
-            f"📦 <b>{name}</b>\n"
-            f"💵 <b>Giá niêm yết:</b> <s>{int(base_price):,}đ</s>\n"
-            f"💥 <b>Giá sau gộp mã hiện tại:</b> <b><u>{int(eval_res['final_price']):,}đ</u></b> (-{eval_res['discount_percent']}%)\n"
-            f"🎯 <b>Mục tiêu canh mua:</b> <b>{target_str}</b>\n"
-            f"📊 <b>Trạng thái:</b> {ready_icon}\n\n"
-            f"💡 <i>Bạn có thể đổi nhanh mục tiêu giảm bằng các nút bên dưới:</i>"
+            f"📦 <b>{name}</b>\n\n"
+            f"🎯 <b>Bạn muốn mua món này với giá bao nhiêu?</b>\n"
+            f"<i>(Chỉ cần nhắn số tiền bạn muốn đạt được, ví dụ: <code>100k</code> hoặc <code>95000</code>)</i>"
         )
 
-        # Nút bấm gọn gàng, bố cục 2–3 cột tiện dụng
         buttons = {
             "inline_keyboard": [
                 [
-                    {"text": "🎯 Canh Giảm 20%", "callback_data": f"target_{item_id}_20"},
-                    {"text": "🎯 Canh Giảm 30%", "callback_data": f"target_{item_id}_30"},
-                    {"text": "🎯 Canh Giảm 40%", "callback_data": f"target_{item_id}_40"}
-                ],
-                [
-                    {"text": "🛒 Xem Trên Shopee", "url": details.get("product_url", raw_url)},
-                    {"text": "🧮 Thử Gộp Mã Ngay", "callback_data": f"stack_{item_id}"}
-                ],
-                [
-                    {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
-                    {"text": "❌ Hủy Canh Món Này", "callback_data": f"del_{item_id}"}
+                    {"text": "🛒 Xem Trước Trên Shopee", "url": details.get("product_url", raw_url)}
                 ]
             ]
         }
 
-        img = details.get("image_url")
         if img:
             await self.send_photo(img, msg, reply_markup=buttons)
         else:
@@ -308,10 +348,89 @@ class TelegramBotService:
         if not clean_text:
             return
 
-        # 1. Kiểm tra dán link Shopee trực tiếp
+        chat_key = str(user_chat_id or self.chat_id)
+
+        # 1. Kiểm tra xem người dùng có đang trả lời giá cho sản phẩm vừa gửi không
+        if chat_key in self.pending_price_input and not clean_text.startswith("/") and "shopee.vn" not in clean_text and "shp.ee" not in clean_text:
+            target_price = self._parse_price_from_text(clean_text)
+            if target_price and target_price > 0:
+                pending = self.pending_price_input.pop(chat_key)
+                item_id = pending["item_id"]
+                
+                if pending.get("action") == "update_target":
+                    p_exist = database.get_product_by_id(item_id)
+                    p_name = p_exist["name"] if p_exist else pending.get("name", item_id)
+                    p_url = p_exist["product_url"] if p_exist else pending.get("url", "https://shopee.vn")
+                    p_img = p_exist.get("image_url") if p_exist else pending.get("image_url")
+                    
+                    database.add_product(
+                        item_id=item_id,
+                        shop_id=p_exist.get("shop_id", "0") if p_exist else "0",
+                        name=p_name,
+                        url=p_url,
+                        image_url=p_img,
+                        target_mode="PRICE",
+                        target_value=target_price,
+                        baseline_price=target_price
+                    )
+                    database.update_product_evaluation(
+                        item_id=item_id,
+                        current_price=target_price,
+                        final_price=target_price,
+                        discount_percent=0,
+                        is_deal_ready=0,
+                        applied_vouchers=[]
+                    )
+                    await self.send_message(
+                        f"🎯 Đã cập nhật giá muốn đạt được cho <b>{p_name}</b> thành: <b><u>≤ {int(target_price):,}đ</u></b>!"
+                    )
+                    return
+                else:
+                    # new_product
+                    database.add_product(
+                        item_id=item_id,
+                        shop_id=pending.get("shop_id", "0"),
+                        name=pending["name"],
+                        url=pending["url"],
+                        image_url=pending.get("image_url"),
+                        target_mode="PRICE",
+                        target_value=target_price,
+                        baseline_price=target_price
+                    )
+                    database.update_product_evaluation(
+                        item_id=item_id,
+                        current_price=target_price,
+                        final_price=target_price,
+                        discount_percent=0,
+                        is_deal_ready=0,
+                        applied_vouchers=[]
+                    )
+                    msg = (
+                        f"✅ <b>ĐÃ THIẾT LẬP MỤC TIÊU THEO DÕI!</b>\n\n"
+                        f"📦 <b>{pending['name']}</b>\n"
+                        f"🎯 <b>Giá muốn đạt được:</b> <b><u>≤ {int(target_price):,}đ</u></b>\n"
+                        f"⏳ <b>Trạng thái:</b> Đang theo dõi voucher & đợt giảm giá...\n\n"
+                        f"💡 <i>Bot sẽ bắn cảnh báo ngay khi phát hiện voucher giúp mua món này với giá ≤ {int(target_price):,}đ!</i>"
+                    )
+                    buttons = {
+                        "inline_keyboard": [
+                            [
+                                {"text": "🎯 Đổi Giá Muốn Đạt", "callback_data": f"chtarget_{item_id}"},
+                                {"text": "🛒 Xem Trên Shopee", "url": pending["url"]}
+                            ],
+                            [
+                                {"text": "📋 Xem Watchlist", "callback_data": "menu_list"},
+                                {"text": "❌ Hủy Canh", "callback_data": f"del_{item_id}"}
+                            ]
+                        ]
+                    }
+                    await self.send_message(msg, reply_markup=buttons)
+                    return
+
+        # 2. Kiểm tra dán link Shopee trực tiếp
         if "shopee.vn" in clean_text or "shp.ee" in clean_text:
             if not clean_text.startswith("/"):
-                handled = await self.handle_direct_link(clean_text)
+                handled = await self.handle_direct_link(clean_text, user_chat_id=user_chat_id)
                 if handled:
                     return
 
@@ -396,19 +515,12 @@ class TelegramBotService:
 
     async def _cmd_add_guide(self):
         msg = (
-            "➕ <b>HƯỚNG DẪN THÊM SẢN PHẨM CANH DEAL</b>\n\n"
-            "Rất đơn giản! Bạn chỉ cần <b>COPY và DÁN THẲNG LINK SHOPEE</b> vào ô chat này.\n\n"
-            "💡 <b>Các ví dụ tiện lợi:</b>\n"
-            "1. <b>Dán link trực tiếp:</b>\n"
-            "   <code>https://shopee.vn/product/88888/12345678</code>\n"
-            "   <i>(Bot tự động canh khi giảm ≥ 30%)</i>\n\n"
-            "2. <b>Dán kèm % giảm mong muốn:</b>\n"
-            "   <code>https://shopee.vn/product/88888/12345678 35%</code>\n\n"
-            "3. <b>Dán kèm mức giá kỳ vọng:</b>\n"
-            "   <code>https://shopee.vn/product/88888/12345678 450k</code>\n\n"
-            "4. <b>Hỗ trợ cả link chia sẻ ngắn từ app:</b>\n"
-            "   <code>https://vn.shp.ee/xxxxxx</code>\n\n"
-            "👉 <i>Hãy copy link món hàng bạn thích và gửi vào đây ngay bây giờ!</i>"
+            "➕ <b>CÁCH THÊM SẢN PHẨM CANH DEAL</b>\n\n"
+            "Chỉ cần gửi <b>LINK</b> và <b>MỨC GIÁ BẠN MUỐN ĐẠT ĐƯỢC</b>:\n\n"
+            "💡 <b>Ví dụ:</b>\n"
+            "• Gửi kèm giá: <code>https://s.shopee.vn/4VdSGmu8Pf 100k</code>\n"
+            "• Hoặc chỉ gửi link Shopee, bot sẽ hỏi bạn mức giá muốn mua!\n\n"
+            "👉 <i>Dù sản phẩm có bao nhiêu phân loại đắt hay rẻ, bot sẽ bám sát duy nhất mức giá bạn đã đặt!</i>"
         )
         buttons = {
             "inline_keyboard": [
@@ -423,7 +535,7 @@ class TelegramBotService:
         if not products:
             msg = (
                 "📋 <b>WATCHLIST CỦA BẠN ĐANG TRỐNG</b>\n\n"
-                "Bạn chưa thêm sản phẩm nào. Hãy copy và dán một link Shopee vào đây để bắt đầu theo dõi!"
+                "Bạn chưa thêm sản phẩm nào. Hãy copy và dán một link Shopee kèm giá mong muốn vào đây!"
             )
             buttons = {
                 "inline_keyboard": [
@@ -436,26 +548,24 @@ class TelegramBotService:
 
         msg = f"📋 <b>DANH SÁCH SẢN PHẨM ĐANG THEO DÕI ({len(products)} món):</b>\n\n"
         for i, p in enumerate(products, 1):
-            ready_icon = "🔥 ĐẠT GIÁ" if p.get("is_deal_ready") == 1 else "⏳ Đang canh"
-            t_str = f"≥ {p.get('target_value')}%" if str(p.get('target_mode')).upper() == 'PERCENT' else f"≤ {int(p.get('target_value', 0)):,}đ"
-            base_p = int(p.get('baseline_market_price') or p.get('baseline_price', 0))
-            cur_p = int(p.get('final_price') or p.get('current_price', 0))
+            ready_icon = "🔥 ĐÃ ĐẠT GIÁ" if p.get("is_deal_ready") == 1 else "⏳ Đang theo dõi"
+            t_mode = str(p.get('target_mode', 'PRICE')).upper()
+            t_val = float(p.get('target_value', 0))
+            t_str = f"giảm ≥ {t_val}%" if t_mode == 'PERCENT' else f"≤ {int(t_val):,}đ"
             
             msg += (
                 f"{i}. <b>{p['name']}</b>\n"
                 f"   • Trạng thái: <b>{ready_icon}</b>\n"
-                f"   • Giá niêm yết: <s>{base_p:,}đ</s>\n"
-                f"   • Giá sau gộp mã: <b><u>{cur_p:,}đ</u></b> (-{p.get('discount_percent', 0)}%)\n"
-                f"   • Mục tiêu của bạn: {t_str}\n"
+                f"   • Giá muốn đạt được: <b><u>{t_str}</u></b>\n"
                 f"   • ID: <code>{p.get('item_id_on_platform') or p.get('item_id')}</code>\n\n"
             )
 
         kb_rows = []
         for p in products[:4]:
             i_id = p.get('item_id_on_platform') or p.get('item_id')
-            short_name = p['name'][:14] + ".." if len(p['name']) > 14 else p['name']
+            short_name = p['name'][:12] + ".." if len(p['name']) > 12 else p['name']
             kb_rows.append([
-                {"text": f"🧮 Gộp: {short_name}", "callback_data": f"stack_{i_id}"},
+                {"text": f"🎯 Đổi Giá: {short_name}", "callback_data": f"chtarget_{i_id}"},
                 {"text": "❌ Xóa", "callback_data": f"del_{i_id}"}
             ])
 
@@ -786,6 +896,19 @@ class TelegramBotService:
                                 elif cb_data.startswith("del_"):
                                     item_id = cb_data.replace("del_", "")
                                     asyncio.create_task(self._cmd_del([item_id]))
+                                elif cb_data.startswith("chtarget_"):
+                                    item_id = cb_data.replace("chtarget_", "")
+                                    p_exist = database.get_product_by_id(item_id)
+                                    p_name = p_exist["name"] if p_exist else f"Sản phẩm {item_id}"
+                                    self.pending_price_input[sender_id] = {
+                                        "action": "update_target",
+                                        "item_id": item_id
+                                    }
+                                    asyncio.create_task(self.send_message(
+                                        f"🎯 <b>Nhập mức giá mới bạn muốn đạt được cho:</b>\n"
+                                        f"📦 <i>{p_name}</i>\n\n"
+                                        f"<i>(Chỉ cần gửi tin nhắn số tiền, ví dụ: <code>90k</code> hoặc <code>95000</code>)</i>"
+                                    ))
                                 elif cb_data.startswith("target_"):
                                     # target_{item_id}_{pct}
                                     parts = cb_data.split("_")
