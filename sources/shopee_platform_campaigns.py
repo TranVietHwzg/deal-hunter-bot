@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import httpx
@@ -30,9 +31,13 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
     async def _fetch_public_page_vouchers(self, url: str) -> List[Dict[str, Any]]:
         """Bóc tách dữ liệu JSON công khai nhúng trong trang landing page của Shopee"""
         discovered = []
+        req_headers = dict(self.headers)
+        cookie = os.environ.get("SHOPEE_COOKIE")
+        if cookie:
+            req_headers["Cookie"] = cookie
         try:
             async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-                resp = await client.get(url, headers=self.headers)
+                resp = await client.get(url, headers=req_headers)
                 if resp.status_code == 200:
                     html_text = resp.text
                     # 1. Tìm các block script chứa JSON state hoặc campaign voucher

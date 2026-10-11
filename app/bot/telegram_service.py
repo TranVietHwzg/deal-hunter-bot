@@ -457,6 +457,11 @@ class TelegramBotService:
             await self.send_message(resp, reply_markup=get_elite_main_keyboard())
             return
 
+        if text == "/coverage":
+            resp = await self.elite_commands.handle_coverage_command()
+            await self.send_message(resp, reply_markup=get_elite_main_keyboard())
+            return
+
         if text.startswith("/leak") or text.startswith("/nhapma"):
             resp_msg = await self.elite_commands.handle_leak_command(text)
             await self.send_message(resp_msg, reply_markup=get_elite_main_keyboard())

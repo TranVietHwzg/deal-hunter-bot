@@ -246,6 +246,15 @@ class EliteDiscoveryService:
             rate_limit_state="NORMAL"
         )
 
+        import os
+        cookie_active = bool(os.environ.get("SHOPEE_COOKIE"))
+        coverage_stats = {
+            "cookie_enabled": cookie_active,
+            "tracked_shops_count": len(tracked_shop_ids),
+            "sources_scanned": sources_scanned,
+            "errors_count": len(errors)
+        }
+
         return {
             "scan_id": scan_id,
             "sources_count": sources_scanned,
@@ -255,5 +264,7 @@ class EliteDiscoveryService:
             "elite_updated": elite_updated,
             "elite_upcoming": elite_upcoming,
             "events_to_notify": events_to_notify,
-            "errors": errors
+            "errors": errors,
+            "cookie_active": cookie_active,
+            "coverage_stats": coverage_stats
         }

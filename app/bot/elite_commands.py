@@ -19,7 +19,8 @@ from app.bot.elite_templates import (
     format_voucher_verification_card,
     format_voucher_source_card,
     format_voucher_status_card,
-    format_audit_summary_report
+    format_audit_summary_report,
+    format_coverage_report
 )
 
 class EliteCommands:
@@ -224,16 +225,30 @@ class EliteCommands:
             return format_voucher_status_card(v)
         
         # /status chung
+        import os
+        cookie_status = "✅ ĐÃ KẾT NỐI (Chống 403 active)" if os.environ.get("SHOPEE_COOKIE") else "⚠️ Chưa cấu hình"
         personal_msg = self.discovery_service.personal_source.get_status_message()
         return (
             "📊 <b>TRẠNG THÁI ELITE SHOPEE RADAR</b>\n"
             "────────────────────\n"
             "• Chế độ: <b>ELITE VOUCHER RADAR (Ngưỡng >= 80đ)</b>\n"
             "• Tiêu chuẩn: <b>Chỉ chấp nhận mã có bằng chứng VERIFIED</b>\n"
+            f"• Cookie Shopee: <b>{cookie_status}</b>\n"
             "• Lọc Freeship: <b>KÍCH HOẠT (100% Loại trừ)</b>\n"
             f"• {personal_msg}\n\n"
-            "💡 <i>Gõ <code>/status &lt;MÃ&gt;</code> để kiểm tra trạng thái của một voucher cụ thể.</i>"
+            "💡 <i>Gõ <code>/status &lt;MÃ&gt;</code> để kiểm tra trạng thái của một voucher cụ thể hoặc <code>/coverage</code> để xem độ bao phủ.</i>"
         )
+
+    async def handle_coverage_command(self) -> str:
+        """Xử lý lệnh: /coverage (Xem độ bao phủ dữ liệu chống sót)"""
+        import os
+        cookie_enabled = bool(os.environ.get("SHOPEE_COOKIE"))
+        tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
+        stats = {
+            "cookie_enabled": cookie_enabled,
+            "tracked_count": len(tracked)
+        }
+        return format_coverage_report(stats, tracked_count=len(tracked))
 
     async def handle_elite_command(self) -> Tuple[str, Dict[str, Any]]:
         """Xử lý lệnh: /elite (Chỉ hiển thị các mã đã xác minh)"""
