@@ -11,6 +11,7 @@ from sources.community_voucher_source import CommunityVoucherSource
 from sources.payment_voucher_source import PaymentVoucherSource
 from sources.live_video_voucher_source import LiveVideoVoucherSource
 from sources.leak_inbox_source import LeakInboxSource
+from sources.public_banner_source import PublicBannerSource
 
 class DiscoveryService:
     def __init__(
@@ -27,6 +28,7 @@ class DiscoveryService:
         self.payment_source = PaymentVoucherSource()
         self.live_video_source = LiveVideoVoucherSource()
         self.leak_source = LeakInboxSource()
+        self.banner_source = PublicBannerSource()
 
     async def run_scan(
         self,
@@ -94,7 +96,14 @@ class DiscoveryService:
             except Exception as e:
                 errors.append(f"Leak source error: {e}")
 
-        # 7. Phân tích & Xử lý qua UpcomingVoucherDiscovery
+        # 7. Quét banner công khai mở rộng (hunt-only, không claim)
+        if scan_mode in (ScanMode.AUTO, ScanMode.MANUAL_ALL, ScanMode.MANUAL_PLATFORM):
+            try:
+                collected_items.extend(await self.banner_source.fetch_vouchers())
+            except Exception as e:
+                errors.append(f"Banner source error: {e}")
+
+        # 8. Phân tích & Xử lý qua UpcomingVoucherDiscovery
         proc_res = self.discovery.process_collected_vouchers(
             collected_items,
             min_fixed_discount=min_fixed_discount,

@@ -13,6 +13,7 @@ from repositories.voucher_repository import VoucherRepository
 from repositories.shop_repository import ShopRepository
 from repositories.scan_repository import ScanRepository
 from services.discovery_service import DiscoveryService
+from services.elite_discovery_service import EliteDiscoveryService
 from services.lifecycle_service import LifecycleService
 from models.scan_run import ScanMode
 from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
@@ -21,31 +22,37 @@ voucher_repo = VoucherRepository()
 shop_repo = ShopRepository()
 scan_repo = ScanRepository()
 discovery_service = DiscoveryService(voucher_repo, scan_repo)
+elite_discovery = EliteDiscoveryService(voucher_repo, scan_repo, shop_repo)
 lifecycle_service = LifecycleService(voucher_repo, scan_repo)
 
 async def seed_default_vouchers():
-    """Đồng bộ ban đầu kho voucher Shopee chiến dịch & mã ẩn"""
-    await discovery_service.run_scan(ScanMode.AUTO)
-    print("[Radar] Đã nạp thành công kho mã Shopee ban đầu (ZERO FREESHIP).")
+    """Đồng bộ ban đầu kho voucher Shopee chiến dịch & mã ẩn chuẩn Elite"""
+    await elite_discovery.run_elite_scan(ScanMode.AUTO)
+    print("[Radar] Đã nạp thành công kho mã Elite Shopee ban đầu (ZERO FREESHIP).")
 
 async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
-    """Chạy một chu kỳ Radar hoàn chỉnh (Discovery + Lifecycle check)"""
-    # 1. Quét khám phá nguồn Shopee công khai
-    scan_res = await discovery_service.run_scan(ScanMode.AUTO)
+    """Chạy một chu kỳ Radar hoàn chỉnh (Elite Discovery + Lifecycle check)"""
+    # 1. Quét khám phá nguồn Shopee công khai chuẩn Elite
+    scan_res = await elite_discovery.run_elite_scan(ScanMode.AUTO)
 
-    # 2. Gửi thông báo cho các voucher mới phát hiện
+    # 2. Gửi thông báo cho các voucher Elite mới phát hiện
     if bot_instance:
+        notifier = getattr(bot_instance, "elite_notifier", None)
         for ev in scan_res.get("events_to_notify", []):
             ev_type = ev.get("type")
             v = ev.get("voucher")
+            sc = ev.get("score", 90)
             if not v:
                 continue
-            if ev_type in ("UPCOMING_KNOWN", "UPCOMING_UNKNOWN"):
-                await bot_instance.broadcast_upcoming_voucher(v)
-            elif ev_type == "ACTIVE_NEW":
-                await bot_instance.broadcast_active_voucher(v)
-            elif ev_type == "CODE_REVEALED":
-                await bot_instance.broadcast_code_revealed(v)
+            if notifier:
+                await notifier.notify_elite_voucher(v, ev_type, score=sc)
+            else:
+                if ev_type in ("UPCOMING_KNOWN", "UPCOMING_UNKNOWN"):
+                    await bot_instance.broadcast_upcoming_voucher(v)
+                elif ev_type == "ACTIVE_NEW":
+                    await bot_instance.broadcast_active_voucher(v)
+                elif ev_type == "CODE_REVEALED":
+                    await bot_instance.broadcast_code_revealed(v)
 
     # 3. Chạy Lifecycle Check (chuyển ACTIVE, nhắc giờ T-15m / T-2m)
     lifecycle_notifs = lifecycle_service.run_lifecycle_cycle()

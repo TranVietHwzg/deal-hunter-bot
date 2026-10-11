@@ -35,10 +35,11 @@ def test_main_menu_keyboard_layout():
     kb = bot.get_main_menu_keyboard()
     assert "inline_keyboard" in kb
     rows = kb["inline_keyboard"]
-    # Kiểm tra lưới 3 hàng, mỗi hàng 2 nút
+    # Kiểm tra lưới 3 hàng, tổng cộng 5 nút chuẩn Elite
     assert len(rows) == 3
+    total_buttons = sum(len(r) for r in rows)
+    assert total_buttons == 5
     for r in rows:
-        assert len(r) == 2
         for btn in r:
             assert "text" in btn
             assert "callback_data" in btn or "url" in btn

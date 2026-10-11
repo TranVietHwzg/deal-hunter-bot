@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 from models.voucher import Voucher, VoucherStatus, ScopeType
 from repositories.voucher_repository import VoucherRepository
 from core.voucher_filter import is_freeship, is_worthy_voucher
+from core.voucher_verify import verify_hunt_only
 from core.voucher_classifier import classify_scope
 from core.voucher_lifecycle import determine_initial_status, parse_vietnam_time
 
@@ -35,6 +36,20 @@ class UpcomingVoucherDiscovery:
             is_ship, reason = is_freeship(item)
             if is_ship:
                 continue
+
+            # 1b. Verify hunt-only: chuẩn hóa mã, loại mã rác, không claim
+            try:
+                ok, _, verified = verify_hunt_only(item)
+                if not ok:
+                    # vẫn cho sự kiện UPCOMING_UNKNOWN_CODE đi qua nếu thiếu code
+                    # còn lại bỏ mã rác / freeship / sai định dạng
+                    if not item.get("voucher_code"):
+                        verified = item
+                    else:
+                        continue
+                item = verified
+            except Exception:
+                pass
 
             # 2. Scope classification
             scope = classify_scope(item)

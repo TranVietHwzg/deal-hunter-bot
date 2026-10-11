@@ -17,6 +17,10 @@ from models.voucher import Voucher, VoucherStatus, ScopeType
 from models.notification import NotificationEvent, NotificationEventType
 from app.bot.keyboard_factory import get_main_keyboard, get_voucher_action_keyboard, get_back_keyboard
 from app.bot.scan_controls import ScanControls
+from app.bot.elite_keyboard import get_elite_main_keyboard, get_elite_back_keyboard, get_elite_voucher_action_keyboard
+from app.bot.elite_commands import EliteCommands
+from services.elite_discovery_service import EliteDiscoveryService
+from services.elite_notification_service import EliteNotificationService
 from app.bot.notification_templates import (
     format_upcoming_known_code,
     format_upcoming_unknown_code,
@@ -44,13 +48,18 @@ class TelegramBotService:
         self.lifecycle_service = LifecycleService(self.voucher_repo, self.scan_repo, self.dedupe_service)
         self.scan_controls = ScanControls(self.voucher_repo, self.shop_repo, self.discovery_service)
 
+        # Khởi tạo tầng Elite Radar
+        self.elite_discovery = EliteDiscoveryService(self.voucher_repo, self.scan_repo, self.shop_repo)
+        self.elite_commands = EliteCommands(self.voucher_repo, self.shop_repo, self.elite_discovery)
+        self.elite_notifier = EliteNotificationService(self, self.scan_repo)
+
         # Trạng thái chờ người dùng nhập link shop
         self.awaiting_shop_link_users = set()
         self.pending_price_input: Dict[str, Dict[str, Any]] = {}
 
     def get_main_menu_keyboard(self) -> Dict[str, Any]:
-        """Tương thích ngược: lấy bàn phím chính 6 nút"""
-        return get_main_keyboard()
+        """Bàn phím chính 5 nút chuẩn Elite Radar"""
+        return get_elite_main_keyboard()
 
     @staticmethod
     def _parse_price_from_text(text: str) -> Optional[float]:
@@ -312,17 +321,7 @@ class TelegramBotService:
     # ----------------- XỬ LÝ LỆNH & NÚT BẤM (BOT CONTROLS) -----------------
 
     def get_welcome_message(self) -> str:
-        return (
-            "📡 <b>SHOPEE UPCOMING HIDDEN VOUCHER RADAR</b>\n"
-            "────────────────────\n"
-            "Chào bạn! Bot chuyên phát hiện và theo dõi:\n"
-            "• 🔑 <b>Mã sắp mở</b> trong hôm nay, ngày mai và 7 ngày tới.\n"
-            "• 🕵️ <b>Mã ẩn công khai</b> từ chiến dịch & gian hàng Shopee.\n"
-            "• 🏪 <b>Voucher riêng của shop</b> theo danh sách bạn theo dõi.\n"
-            "• ⏰ <b>Nhắc trước 15 phút & 2 phút</b> khi mã sắp có hiệu lực.\n"
-            "• 🚫 <b>Tuyệt đối KHÔNG Freeship</b> — Chỉ mã giảm trực tiếp tiền hàng!\n\n"
-            "Chọn chức năng bên dưới hoặc gửi link shop để bắt đầu:"
-        )
+        return self.elite_commands.get_welcome_message()
 
     async def handle_callback_query(self, query: Dict[str, Any]) -> None:
         query_id = query.get("id")
@@ -332,19 +331,26 @@ class TelegramBotService:
 
         await self.answer_callback(query_id)
 
-        if data == "action:menu":
-            await self.send_message(self.get_welcome_message(), reply_markup=get_main_keyboard())
-        elif data == "action:scan_now":
-            msg, markup = await self.scan_controls.execute_manual_scan()
+        # Bộ điều hướng Elite Radar
+        if data in ("action:elite_menu", "action:menu"):
+            await self.send_message(self.get_welcome_message(), reply_markup=get_elite_main_keyboard())
+        elif data in ("action:elite_super", "action:top"):
+            msg, markup = await self.elite_commands.handle_super_vouchers()
+            await self.send_message(msg, reply_markup=markup)
+        elif data in ("action:elite_upcoming", "action:upcoming"):
+            msg, markup = await self.elite_commands.handle_upcoming_vouchers()
+            await self.send_message(msg, reply_markup=markup)
+        elif data in ("action:elite_shops", "action:shops"):
+            msg, markup = await self.elite_commands.handle_shop_vouchers()
+            await self.send_message(msg, reply_markup=markup)
+        elif data in ("action:elite_scan_now", "action:scan_now"):
+            msg, markup = await self.elite_commands.handle_scan_now()
+            await self.send_message(msg, reply_markup=markup)
+        elif data in ("action:elite_settings", "action:settings"):
+            msg, markup = self.elite_commands.get_settings_view()
             await self.send_message(msg, reply_markup=markup)
         elif data == "action:platform":
             msg, markup = self.scan_controls.get_platform_view()
-            await self.send_message(msg, reply_markup=markup)
-        elif data == "action:shops":
-            msg, markup = self.scan_controls.get_shops_view()
-            await self.send_message(msg, reply_markup=markup)
-        elif data == "action:upcoming":
-            msg, markup = self.scan_controls.get_upcoming_view()
             await self.send_message(msg, reply_markup=markup)
         elif data == "action:add_shop":
             self.awaiting_shop_link_users.add(chat_id)
@@ -353,10 +359,7 @@ class TelegramBotService:
                 "Vui lòng dán link shop Shopee công khai vào đây\n"
                 "<i>(Ví dụ: https://shopee.vn/ten_shop hoặc /addshop https://shopee.vn/ten_shop)</i>:"
             )
-            await self.send_message(prompt, reply_markup=get_back_keyboard())
-        elif data == "action:settings":
-            msg, markup = self.scan_controls.get_settings_view()
-            await self.send_message(msg, reply_markup=markup)
+            await self.send_message(prompt, reply_markup=get_elite_back_keyboard())
 
     async def handle_message(self, message: Dict[str, Any]) -> None:
         chat_id = str(message.get("chat", {}).get("id", self.chat_id))
@@ -366,26 +369,26 @@ class TelegramBotService:
 
         # 1. Các lệnh bắt đầu / điều hướng chính
         if text in ("/start", "/help", "/menu"):
-            await self.send_message(self.get_welcome_message(), reply_markup=get_main_keyboard())
+            await self.send_message(self.get_welcome_message(), reply_markup=get_elite_main_keyboard())
             return
 
-        if text == "/scan":
-            msg, markup = await self.scan_controls.execute_manual_scan()
+        if text in ("/scan", "/quyetngay"):
+            msg, markup = await self.elite_commands.handle_scan_now()
             await self.send_message(msg, reply_markup=markup)
             return
 
-        if text == "/upcoming":
-            msg, markup = self.scan_controls.get_upcoming_view()
+        if text in ("/upcoming", "/sapmo"):
+            msg, markup = await self.elite_commands.handle_upcoming_vouchers()
             await self.send_message(msg, reply_markup=markup)
             return
 
-        if text == "/platform":
-            msg, markup = self.scan_controls.get_platform_view()
+        if text in ("/shops", "/mashop"):
+            msg, markup = await self.elite_commands.handle_shop_vouchers()
             await self.send_message(msg, reply_markup=markup)
             return
 
-        if text == "/shops":
-            msg, markup = self.scan_controls.get_shops_view()
+        if text in ("/elite", "/super", "/top"):
+            msg, markup = await self.elite_commands.handle_super_vouchers()
             await self.send_message(msg, reply_markup=markup)
             return
 
@@ -393,17 +396,17 @@ class TelegramBotService:
             parts = text.split(maxsplit=1)
             if len(parts) > 1:
                 res_msg, _ = self.scan_controls.parse_and_add_shop(parts[1])
-                await self.send_message(res_msg, reply_markup=get_main_keyboard())
+                await self.send_message(res_msg, reply_markup=get_elite_main_keyboard())
             else:
                 self.awaiting_shop_link_users.add(chat_id)
-                await self.send_message("Vui lòng gửi link shop dạng: <code>/addshop https://shopee.vn/ten_shop</code>", reply_markup=get_back_keyboard())
+                await self.send_message("Vui lòng gửi link shop dạng: <code>/addshop https://shopee.vn/ten_shop</code>", reply_markup=get_elite_back_keyboard())
             return
 
         if text.startswith("/removeshop"):
             parts = text.split(maxsplit=1)
             if len(parts) > 1:
                 res_msg = self.scan_controls.remove_shop(parts[1])
-                await self.send_message(res_msg, reply_markup=get_main_keyboard())
+                await self.send_message(res_msg, reply_markup=get_elite_main_keyboard())
             else:
                 await self.send_message("Vui lòng gửi mã shop cần xóa dạng: <code>/removeshop ten_shop</code>")
             return
@@ -411,33 +414,29 @@ class TelegramBotService:
         if text == "/active":
             active_list = self.voucher_repo.get_active_vouchers()
             if not active_list:
-                await self.send_message("🟢 <i>Hiện không có mã nào đang ACTIVE trong hệ thống.</i>", reply_markup=get_back_keyboard())
+                await self.send_message("🟢 <i>Hiện không có mã nào đang ACTIVE trong hệ thống.</i>", reply_markup=get_elite_back_keyboard())
             else:
                 lines = [f"🟢 <b>CÁC MÃ ĐANG HOẠT ĐỘNG ({len(active_list)} mã):</b>\n"]
                 for v in active_list[:6]:
                     lines.append(f"• <code>{v.voucher_code}</code>: Giảm {format_discount_value(v)} (Đơn {format_currency(v.min_order_value)}) — Hạn {v.end_time}")
-                await self.send_message("\n".join(lines), reply_markup=get_back_keyboard())
+                await self.send_message("\n".join(lines), reply_markup=get_elite_back_keyboard())
             return
 
         if text == "/settings":
-            msg, markup = self.scan_controls.get_settings_view()
+            msg, markup = self.elite_commands.get_settings_view()
             await self.send_message(msg, reply_markup=markup)
             return
 
         if text == "/status":
-            upcoming = self.voucher_repo.get_upcoming_vouchers(days=7)
-            active = self.voucher_repo.get_active_vouchers()
-            shops = self.shop_repo.get_tracked_shops(enabled_only=True)
+            personal_msg = self.elite_discovery.personal_source.get_status_message()
             status_msg = (
-                "📊 <b>TRẠNG THÁI HỆ THỐNG RADAR SHOPEE</b>\n"
+                "📊 <b>TRẠNG THÁI ELITE SHOPEE RADAR</b>\n"
                 "────────────────────\n"
-                f"• Trạng thái Radar: <b>HOẠT ĐỘNG 24/7</b>\n"
-                f"• Mã đang ACTIVE: <b>{len(active)}</b>\n"
-                f"• Mã sắp mở trong 7 ngày: <b>{len(upcoming)}</b>\n"
-                f"• Shop đang theo dõi: <b>{len(shops)}</b>\n"
+                "• Chế độ: <b>ELITE VOUCHER RADAR (Ngưỡng >= 80đ)</b>\n"
                 "• Lọc Freeship: <b>KÍCH HOẠT (100% Loại trừ)</b>\n"
+                f"• {personal_msg}\n"
             )
-            await self.send_message(status_msg, reply_markup=get_main_keyboard())
+            await self.send_message(status_msg, reply_markup=get_elite_main_keyboard())
             return
 
         if text == "/top" or text.startswith("/top "):
