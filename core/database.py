@@ -7,7 +7,8 @@ from typing import List, Dict, Any, Optional
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals.db")
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    db_file = os.environ.get("TEST_DB_PATH") or DB_PATH
+    conn = sqlite3.connect(db_file)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -170,7 +171,13 @@ def init_db():
         "source_evidence_excerpt": "TEXT",
         "verified_at": "TEXT",
         "last_checked_at": "TEXT",
-        "percentage_used": "REAL"
+        "percentage_used": "REAL",
+        "platform_voucher_id": "TEXT",
+        "claim_type": "TEXT DEFAULT 'CODE'",
+        "verification_level": "TEXT DEFAULT 'OBSERVED_PUBLIC'",
+        "eligibility_status": "TEXT DEFAULT 'PERSONAL_UNKNOWN'",
+        "quality_tags": "TEXT",
+        "evidence_score": "INTEGER DEFAULT 50"
     }
     for col_name, col_type in migration_cols.items():
         if col_name not in v_cols:
@@ -178,6 +185,61 @@ def init_db():
                 cursor.execute(f"ALTER TABLE vouchers ADD COLUMN {col_name} {col_type};")
             except Exception as e:
                 print(f"[Database] Lưu ý khi thêm cột {col_name}: {e}")
+
+    try:
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_uq_platform_voucher ON vouchers(platform_id, voucher_id_on_platform);")
+    except Exception:
+        pass
+
+    # Bảng voucher_observations (Lưu mọi quan sát đa nguồn)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS voucher_observations (
+        id TEXT PRIMARY KEY,
+        canonical_id TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        raw_code TEXT,
+        claim_type TEXT NOT NULL DEFAULT 'CODE',
+        discount_amount REAL,
+        discount_percent REAL,
+        min_order_value REAL NOT NULL DEFAULT 0,
+        max_discount REAL,
+        observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        raw_payload_hash TEXT NOT NULL,
+        evidence_excerpt TEXT,
+        http_status INTEGER NOT NULL DEFAULT 200,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (canonical_id) REFERENCES vouchers(id) ON DELETE CASCADE
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_obs_canonical ON voucher_observations(canonical_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_obs_source ON voucher_observations(source_name, observed_at);")
+
+    # Bảng source_runs (Sức khỏe và metrics từng lượt cào)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS source_runs (
+        id TEXT PRIMARY KEY,
+        source_name TEXT NOT NULL,
+        started_at TIMESTAMP NOT NULL,
+        finished_at TIMESTAMP NOT NULL,
+        pages_requested INTEGER NOT NULL DEFAULT 1,
+        http_success_count INTEGER NOT NULL DEFAULT 0,
+        http_failure_count INTEGER NOT NULL DEFAULT 0,
+        items_raw INTEGER NOT NULL DEFAULT 0,
+        items_normalized INTEGER NOT NULL DEFAULT 0,
+        items_new INTEGER NOT NULL DEFAULT 0,
+        items_updated INTEGER NOT NULL DEFAULT 0,
+        items_rejected_by_rule INTEGER NOT NULL DEFAULT 0,
+        latest_source_timestamp TEXT,
+        parser_version TEXT NOT NULL DEFAULT '1.0.0',
+        status TEXT NOT NULL,
+        error_summary TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_name ON source_runs(source_name, started_at DESC);")
+
     conn.commit()
 
 
@@ -452,8 +514,9 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
     ) else 0
     is_hot = 1 if (d_val >= 100000 or (d_type in ["PERCENTAGE", "PERCENT"] and d_val >= 15)) else 0
 
-    start_time = voucher_data.get("start_time")
-    end_time = voucher_data.get("end_time")
+    start_time = voucher_data.get("start_time") or ""
+    end_time = voucher_data.get("end_time") or ""
+    scope_type = "SHOP" if (v_type == "SHOP" or shop_id) else ("CATEGORY" if "CAT" in v_type else "PLATFORM")
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -462,8 +525,8 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
         id, platform_id, voucher_id_on_platform, voucher_code, voucher_type, category,
         title, description, discount_type, discount_value, max_discount_amount, min_spend,
         shop_id, shop_name, claim_url, guide, status, quality_score, is_hot, is_freeship, is_hidden,
-        start_time, end_time, last_verified_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 90, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        start_time, end_time, scope_type, platform, last_verified_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 90, ?, 0, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     ON CONFLICT(platform_id, voucher_id_on_platform) DO UPDATE SET
         voucher_code=excluded.voucher_code,
         voucher_type=excluded.voucher_type,
@@ -483,13 +546,15 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
         is_hidden=excluded.is_hidden,
         start_time=excluded.start_time,
         end_time=excluded.end_time,
+        scope_type=excluded.scope_type,
+        platform=excluded.platform,
         last_verified_at=CURRENT_TIMESTAMP,
         updated_at=CURRENT_TIMESTAMP;
     """, (
         v_id, plat_id, v_ext_id, v_code, v_type, category,
         title, desc, d_type, d_val, max_d, min_sp,
         shop_id, shop_name, claim_url, guide, status, is_hot, is_hidden,
-        start_time, end_time
+        start_time, end_time, scope_type, plat_id
     ))
     conn.commit()
     conn.close()

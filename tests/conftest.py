@@ -28,6 +28,9 @@ def isolate_test_database(tmp_path):
     s_repo.init_schema()
     sc_repo.init_schema()
 
+    from core.database import init_db
+    init_db()
+
     yield db_path_str
 
     # Khôi phục biến môi trường

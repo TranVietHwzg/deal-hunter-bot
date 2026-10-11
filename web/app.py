@@ -46,15 +46,62 @@ def get_metrics():
 
 @app.get("/api/stats")
 def api_get_stats():
-    vouchers = database.get_vouchers(min_score=0)
+    from repositories.voucher_repository import VoucherRepository
+    repo = VoucherRepository()
+    vouchers = repo.get_vouchers(limit=500)
+    health = repo.get_source_health_summary()
     return {
-        "total_vouchers": len(vouchers),
-        "hot_vouchers": len([v for v in vouchers if v.get("discount_value", 0) >= 50000])
+        "total_canonical_vouchers": len(vouchers),
+        "active_vouchers": len([v for v in vouchers if v.status.value == "ACTIVE"]),
+        "upcoming_vouchers": len([v for v in vouchers if "UPCOMING" in v.status.value]),
+        "source_health": health
     }
 
 @app.get("/api/vouchers")
 def api_get_vouchers(min_score: int = 70):
-    return database.get_vouchers(min_score=min_score)
+    from repositories.voucher_repository import VoucherRepository
+    repo = VoucherRepository()
+    vouchers = repo.get_vouchers(limit=100)
+    return [
+        {
+            "id": v.id,
+            "platform": v.platform,
+            "voucher_code": v.voucher_code,
+            "claim_type": v.claim_type,
+            "title": v.title,
+            "scope_type": v.scope_type.value,
+            "shop_name": v.shop_name,
+            "discount_type": v.discount_type.value,
+            "discount_value": v.discount_value,
+            "min_order_value": v.min_order_value,
+            "start_time": v.start_time,
+            "end_time": v.end_time,
+            "status": v.status.value,
+            "quality_tags": v.quality_tags,
+            "source_type": v.source_type,
+            "source_url": v.source_url
+        } for v in vouchers if v.confidence_score >= min_score
+    ]
+
+@app.get("/api/source-runs")
+def api_get_source_runs(limit: int = 20):
+    from repositories.voucher_repository import VoucherRepository
+    repo = VoucherRepository()
+    runs = repo.get_latest_source_runs(limit=limit)
+    return [r.__dict__ for r in runs]
+
+@app.get("/api/health-summary")
+def api_get_health_summary():
+    from repositories.voucher_repository import VoucherRepository
+    repo = VoucherRepository()
+    return repo.get_source_health_summary()
+
+@app.get("/api/observations")
+def api_get_observations(canonical_id: str):
+    from repositories.voucher_repository import VoucherRepository
+    repo = VoucherRepository()
+    obs_list = repo.get_observations(canonical_id)
+    return [o.__dict__ for o in obs_list]
 
 @app.post("/api/scan-now")
 async def api_scan_now():

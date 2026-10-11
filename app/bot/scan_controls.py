@@ -18,18 +18,36 @@ class ScanControls:
         self,
         voucher_repo: Optional[VoucherRepository] = None,
         shop_repo: Optional[ShopRepository] = None,
-        discovery_service: Optional[DiscoveryService] = None
+        discovery_service: Optional[DiscoveryService] = None,
+        orchestrator: Optional[Any] = None
     ):
         self.voucher_repo = voucher_repo or VoucherRepository()
         self.shop_repo = shop_repo or ShopRepository()
         self.discovery_service = discovery_service or DiscoveryService(self.voucher_repo)
+        self.orchestrator = orchestrator
 
     async def execute_manual_scan(self) -> Tuple[str, Dict[str, Any]]:
         """Xử lý nút '🔍 Quét ngay' (MANUAL_ALL)"""
-        scan_res = await self.discovery_service.run_scan(ScanMode.MANUAL_ALL)
-        upcoming = self.voucher_repo.get_upcoming_vouchers(days=7)
-        msg = format_scan_summary(scan_res, upcoming_count=len(upcoming))
-        return msg, get_main_keyboard()
+        if self.orchestrator:
+            res = await self.orchestrator.run_discovery_cycle()
+            raw_obs = res.get("raw_observations_collected", 0)
+            c_new = res.get("canonical_created", 0)
+            c_upd = res.get("canonical_updated", 0)
+            adapted_res = {
+                "sources_scanned": res.get("total_sources", 0),
+                "items_scanned": raw_obs,
+                "new_vouchers": c_new,
+                "updated_vouchers": c_upd,
+                "items_rejected": max(0, raw_obs - c_new - c_upd)
+            }
+            upcoming = self.voucher_repo.get_upcoming_vouchers(days=7)
+            msg = format_scan_summary(adapted_res, upcoming_count=len(upcoming))
+            return msg, get_main_keyboard()
+        else:
+            scan_res = await self.discovery_service.run_scan(ScanMode.MANUAL_ALL)
+            upcoming = self.voucher_repo.get_upcoming_vouchers(days=7)
+            msg = format_scan_summary(scan_res, upcoming_count=len(upcoming))
+            return msg, get_main_keyboard()
 
     def get_platform_view(self) -> Tuple[str, Dict[str, Any]]:
         """Xử lý nút '🌐 Mã toàn sàn'"""

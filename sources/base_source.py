@@ -32,21 +32,27 @@ class BaseVoucherSource(ABC):
         http_failure = 0
         error_summary = None
         status = getattr(self, "status", "HEALTHY")
+        pages_requested = 1
         items: List[Dict[str, Any]] = []
 
         try:
             if not self.circuit_breaker.can_execute():
                 status = "DEGRADED"
                 error_summary = "Circuit breaker open"
+                pages_requested = 0
             else:
                 items = await self.fetch_vouchers()
-                http_success = 1
                 if getattr(self, "status", None) in ("NOT_IMPLEMENTED", "NO_SHOPS_CONFIGURED"):
                     status = self.status
-                elif not items:
-                    status = "PARTIAL"
+                    http_success = 0
+                    pages_requested = 0
                 else:
-                    status = "HEALTHY"
+                    http_success = 1
+                    pages_requested = 1
+                    if not items:
+                        status = "PARTIAL"
+                    else:
+                        status = "HEALTHY"
         except Exception as e:
             http_failure = 1
             status = "FAILED"
@@ -59,7 +65,7 @@ class BaseVoucherSource(ABC):
             source_name=self.name,
             started_at=started_at,
             finished_at=finished_at,
-            pages_requested=1,
+            pages_requested=pages_requested,
             http_success_count=http_success,
             http_failure_count=http_failure,
             items_raw=len(items),

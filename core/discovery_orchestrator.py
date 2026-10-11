@@ -77,8 +77,6 @@ class DiscoveryOrchestrator:
                 continue
 
             raw_items, source_run = res
-            self.voucher_repo.record_source_run(source_run)
-            source_runs.append(source_run)
             raw_observations_collected += len(raw_items)
 
             # 3. Chuẩn hóa qua Dedupe & Canonical Merge
@@ -131,6 +129,10 @@ class DiscoveryOrchestrator:
                                 "quality_tags": quality_res["tags"],
                                 "fingerprint": fp
                             })
+
+            # Ghi nhận source_run vào DB sau khi đã tính đủ items_new, items_updated, items_rejected_by_rule
+            self.voucher_repo.record_source_run(source_run)
+            source_runs.append(source_run)
 
         finished_time = datetime.now(timezone.utc)
         return {

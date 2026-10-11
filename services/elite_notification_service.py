@@ -5,6 +5,7 @@ from app.bot.elite_templates import (
     format_elite_upcoming_known,
     format_elite_shop_voucher,
     format_elite_code_revealed,
+    format_upcoming_unknown_event,
     format_discount_display,
     format_currency,
     format_scope_display
@@ -44,7 +45,10 @@ class EliteNotificationService:
         elif voucher.scope_type == ScopeType.SHOP:
             text = format_elite_shop_voucher(voucher, score=score, reason=reason)
             markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url, shop_url=voucher.shop_url)
-        elif event_type in ("UPCOMING_KNOWN", "UPCOMING_UNKNOWN"):
+        elif event_type in ("UPCOMING_UNKNOWN", "WATCH"):
+            text, t_markup = format_upcoming_unknown_event(voucher)
+            markup = t_markup or get_elite_voucher_action_keyboard(source_url=voucher.source_url)
+        elif event_type in ("UPCOMING_KNOWN", "UPCOMING"):
             text = format_elite_upcoming_known(voucher, score=score, reason=reason)
             markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url)
         else:

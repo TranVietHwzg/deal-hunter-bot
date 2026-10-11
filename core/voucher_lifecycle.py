@@ -51,7 +51,8 @@ def determine_initial_status(
     voucher_code: Optional[str],
     start_time_str: str,
     end_time_str: str,
-    confidence_score: int = 90
+    confidence_score: int = 90,
+    claim_type: str = "CODE"
 ) -> VoucherStatus:
     """Xác định trạng thái ban đầu của voucher khi mới thu thập"""
     if confidence_score < 50:
@@ -71,6 +72,9 @@ def determine_initial_status(
             return VoucherStatus.UPCOMING_UNKNOWN_CODE
 
     if voucher_code and voucher_code.strip():
+        return VoucherStatus.ACTIVE
+
+    if claim_type == "SAVE_BUTTON":
         return VoucherStatus.ACTIVE
 
     return VoucherStatus.DISCOVERED
@@ -100,6 +104,14 @@ def evaluate_lifecycle_transition(voucher: Voucher) -> Tuple[Optional[VoucherSta
             return VoucherStatus.UPCOMING_CODE_KNOWN, "CODE_REVEALED"
         elif not end_dt or now <= end_dt:
             return VoucherStatus.ACTIVE, "VOUCHER_OPENED"
+
+    # 4. Voucher từ DISCOVERED có mã hoặc là SAVE_BUTTON
+    if voucher.status == VoucherStatus.DISCOVERED:
+        if voucher.voucher_code or getattr(voucher, "claim_type", "") == "SAVE_BUTTON":
+            if start_dt and start_dt > now:
+                return (VoucherStatus.UPCOMING_CODE_KNOWN if voucher.voucher_code else VoucherStatus.UPCOMING_UNKNOWN_CODE), "UPCOMING_DISCOVERED"
+            elif not end_dt or now <= end_dt:
+                return VoucherStatus.ACTIVE, "VOUCHER_OPENED"
 
     return None, None
 

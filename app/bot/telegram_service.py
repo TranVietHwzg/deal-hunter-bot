@@ -21,6 +21,7 @@ from app.bot.elite_keyboard import get_elite_main_keyboard, get_elite_back_keybo
 from app.bot.elite_commands import EliteCommands
 from services.elite_discovery_service import EliteDiscoveryService
 from services.elite_notification_service import EliteNotificationService
+from core.discovery_orchestrator import DiscoveryOrchestrator
 from app.bot.notification_templates import (
     format_upcoming_known_code,
     format_upcoming_unknown_code,
@@ -45,12 +46,13 @@ class TelegramBotService:
         self.scan_repo = ScanRepository()
         self.dedupe_service = DedupeService(self.scan_repo)
         self.discovery_service = DiscoveryService(self.voucher_repo, self.scan_repo)
+        self.orchestrator = DiscoveryOrchestrator(self.voucher_repo, self.scan_repo, self.dedupe_service)
         self.lifecycle_service = LifecycleService(self.voucher_repo, self.scan_repo, self.dedupe_service)
-        self.scan_controls = ScanControls(self.voucher_repo, self.shop_repo, self.discovery_service)
+        self.scan_controls = ScanControls(self.voucher_repo, self.shop_repo, self.discovery_service, orchestrator=self.orchestrator)
 
         # Khởi tạo tầng Elite Radar
         self.elite_discovery = EliteDiscoveryService(self.voucher_repo, self.scan_repo, self.shop_repo)
-        self.elite_commands = EliteCommands(self.voucher_repo, self.shop_repo, self.elite_discovery)
+        self.elite_commands = EliteCommands(self.voucher_repo, self.shop_repo, self.elite_discovery, orchestrator=self.orchestrator)
         self.elite_notifier = EliteNotificationService(self, self.scan_repo)
 
         # Trạng thái chờ người dùng nhập link shop

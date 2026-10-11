@@ -23,25 +23,25 @@ class VoucherRepository(BaseRepository):
                 id TEXT PRIMARY KEY,
                 platform TEXT NOT NULL DEFAULT 'SHOPEE',
                 voucher_code TEXT,
-                title TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
                 description TEXT,
-                scope_type TEXT NOT NULL,
+                scope_type TEXT DEFAULT 'PLATFORM',
                 shop_id TEXT,
                 shop_name TEXT,
                 shop_url TEXT,
                 category_names TEXT,
-                discount_type TEXT NOT NULL,
-                discount_value REAL NOT NULL,
+                discount_type TEXT DEFAULT 'FIXED',
+                discount_value REAL DEFAULT 0,
                 max_discount REAL,
-                min_order_value REAL NOT NULL DEFAULT 0,
-                start_time TEXT NOT NULL,
-                end_time TEXT NOT NULL,
-                timezone TEXT NOT NULL DEFAULT 'Asia/Ho_Chi_Minh',
-                status TEXT NOT NULL DEFAULT 'DISCOVERED',
-                is_freeship INTEGER NOT NULL DEFAULT 0,
-                source_url TEXT NOT NULL,
-                source_type TEXT NOT NULL,
-                confidence_score INTEGER NOT NULL DEFAULT 90,
+                min_order_value REAL DEFAULT 0,
+                start_time TEXT DEFAULT '',
+                end_time TEXT DEFAULT '',
+                timezone TEXT DEFAULT 'Asia/Ho_Chi_Minh',
+                status TEXT DEFAULT 'DISCOVERED',
+                is_freeship INTEGER DEFAULT 0,
+                source_url TEXT DEFAULT 'https://shopee.vn',
+                source_type TEXT DEFAULT 'CAMPAIGN_PAGE',
+                confidence_score INTEGER DEFAULT 90,
                 first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -82,11 +82,14 @@ class VoucherRepository(BaseRepository):
                 "verified_at": "TEXT",
                 "last_checked_at": "TEXT",
                 "percentage_used": "REAL",
+                "platform_voucher_id": "TEXT",
                 "claim_type": "TEXT DEFAULT 'CODE'",
                 "verification_level": "TEXT DEFAULT 'OBSERVED_PUBLIC'",
                 "eligibility_status": "TEXT DEFAULT 'PERSONAL_UNKNOWN'",
                 "quality_tags": "TEXT",
-                "evidence_score": "INTEGER DEFAULT 50"
+                "evidence_score": "INTEGER DEFAULT 50",
+                "guide": "TEXT",
+                "last_verified_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
             }
             for col_name, col_type in new_cols.items():
                 if col_name not in cols:
@@ -94,6 +97,11 @@ class VoucherRepository(BaseRepository):
                         cur.execute(f"ALTER TABLE vouchers ADD COLUMN {col_name} {col_type};")
                     except Exception as e:
                         print(f"[VoucherRepository] Lưu ý khi thêm cột {col_name}: {e}")
+
+            try:
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_uq_platform_voucher ON vouchers(platform_id, voucher_id_on_platform);")
+            except Exception:
+                pass
 
             # 2. Bảng voucher_changes
             cur.execute("""
@@ -699,13 +707,27 @@ class VoucherRepository(BaseRepository):
                 if row:
                     return self._row_to_voucher(dict(row))
 
-            # 3. Voucher không code: Trùng claim_url/source_url + discount + min_order
+            # 3. Voucher không code: Trùng claim_url/source_url + discount + min_order + scope/shop_id + start_time
             if claim_url and discount_value:
-                row = cur.execute("""
+                query = """
                 SELECT * FROM vouchers 
                 WHERE platform = ? AND (source_url = ? OR claim_url = ?) 
                   AND discount_value = ? AND min_order_value = ?
-                """, (platform, claim_url, claim_url, discount_value, min_order_value)).fetchone()
+                """
+                params = [platform, claim_url, claim_url, discount_value, min_order_value]
+                if shop_id:
+                    query += " AND shop_id = ?"
+                    params.append(str(shop_id))
+                else:
+                    query += " AND (shop_id IS NULL OR shop_id = '')"
+
+                if start_time and str(start_time).strip():
+                    query += " AND start_time = ?"
+                    params.append(str(start_time).strip())
+                else:
+                    query += " AND (start_time IS NULL OR start_time = '')"
+
+                row = cur.execute(query, tuple(params)).fetchone()
                 if row:
                     return self._row_to_voucher(dict(row))
 

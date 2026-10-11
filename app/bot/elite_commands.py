@@ -28,11 +28,13 @@ class EliteCommands:
         self,
         voucher_repo: VoucherRepository,
         shop_repo: ShopRepository,
-        discovery_service: EliteDiscoveryService
+        discovery_service: EliteDiscoveryService,
+        orchestrator: Optional[Any] = None
     ):
         self.voucher_repo = voucher_repo
         self.shop_repo = shop_repo
         self.discovery_service = discovery_service
+        self.orchestrator = orchestrator
         self.settings = {
             "min_fixed_discount": 30000.0,
             "min_percent_rate": 30.0,
@@ -161,16 +163,33 @@ class EliteCommands:
 
     async def handle_scan_now(self) -> Tuple[str, Dict[str, Any]]:
         """Xử lý nút: 🔍 Quét ngay"""
-        res = await self.discovery_service.run_elite_scan(min_elite_score=self.settings["min_elite_score"])
-        msg = format_scan_summary_elite(
-            sources_count=res["sources_count"],
-            items_scanned=res["items_scanned"],
-            items_rejected=res["items_rejected"],
-            elite_new=res["elite_new"],
-            elite_updated=res["elite_updated"],
-            elite_upcoming=res["elite_upcoming"]
-        )
-        return msg, get_elite_back_keyboard()
+        if self.orchestrator:
+            res = await self.orchestrator.run_discovery_cycle()
+            upcoming_list = self.voucher_repo.get_upcoming_vouchers(days=self.settings.get("lookahead_days", 7))
+            raw_obs = res.get("raw_observations_collected", 0)
+            c_new = res.get("canonical_created", 0)
+            c_upd = res.get("canonical_updated", 0)
+            rejected = max(0, raw_obs - c_new - c_upd)
+            msg = format_scan_summary_elite(
+                sources_count=res.get("total_sources", 0),
+                items_scanned=raw_obs,
+                items_rejected=rejected,
+                elite_new=c_new,
+                elite_updated=c_upd,
+                elite_upcoming=len(upcoming_list)
+            )
+            return msg, get_elite_back_keyboard()
+        else:
+            res = await self.discovery_service.run_elite_scan(min_elite_score=self.settings["min_elite_score"])
+            msg = format_scan_summary_elite(
+                sources_count=res["sources_count"],
+                items_scanned=res["items_scanned"],
+                items_rejected=res["items_rejected"],
+                elite_new=res["elite_new"],
+                elite_updated=res["elite_updated"],
+                elite_upcoming=res["elite_upcoming"]
+            )
+            return msg, get_elite_back_keyboard()
 
     def get_settings_view(self) -> Tuple[str, Dict[str, Any]]:
         """Xử lý nút: ⚙️ Cài đặt"""

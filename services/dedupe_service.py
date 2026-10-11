@@ -7,6 +7,7 @@ from models.voucher import Voucher, ScopeType, VoucherStatus, VerificationStatus
 from models.observation import VoucherObservation
 from repositories.voucher_repository import VoucherRepository
 from repositories.scan_repository import ScanRepository
+from core.voucher_lifecycle import determine_initial_status
 
 class DedupeService:
     def __init__(
@@ -75,9 +76,11 @@ class DedupeService:
             scope_tag = str(shop_id).strip() if (scope_type == "SHOP" and shop_id) else scope_type.upper()
             return f"CANON_{p}_{scope_tag}_{clean_code}"
 
-        # Voucher không code ("Lưu ngay")
+        # Voucher không code ("Lưu ngay"): kết hợp scope_tag và start_time để tránh gộp nhầm qua ngày/qua shop
         url_hash = hashlib.md5((claim_url or "NO_URL").encode("utf-8")).hexdigest()[:8]
-        return f"CANON_{p}_NOC_{url_hash}_{int(discount_value)}_{int(min_order_value)}"
+        scope_tag = str(shop_id).strip() if (scope_type == "SHOP" and shop_id) else scope_type.upper()
+        time_tag = start_time.strip().replace(" ", "_").replace(":", "").replace("/", "") if start_time else "NOTIME"
+        return f"CANON_{p}_{scope_tag}_NOC_{url_hash}_{int(discount_value)}_{int(min_order_value)}_{time_tag}"
 
     def process_observation(
         self,
@@ -149,6 +152,15 @@ class DedupeService:
             except ValueError:
                 v_status_enum = VerificationStatus.UNVERIFIED
 
+            # Xác định trạng thái vòng đời ban đầu chuẩn (ACTIVE, UPCOMING, EXPIRED...)
+            init_status = determine_initial_status(
+                voucher_code=code,
+                start_time_str=start_t,
+                end_time_str=end_t,
+                confidence_score=int(raw_item.get("confidence_score", 90)),
+                claim_type=claim_type
+            )
+
             canonical_voucher = Voucher(
                 id=canonical_id,
                 platform=platform,
@@ -175,6 +187,7 @@ class DedupeService:
                 verification_status=v_status_enum,
                 confidence_score=int(raw_item.get("confidence_score", 90)),
                 is_freeship=int(raw_item.get("is_freeship", 0)),
+                status=init_status,
                 first_seen_at=now_iso,
                 last_seen_at=now_iso,
                 verified_at=raw_item.get("verified_at"),
@@ -189,6 +202,13 @@ class DedupeService:
             if not canonical_voucher.voucher_code and code:
                 canonical_voucher.voucher_code = code
                 canonical_voucher.claim_type = "CODE"
+                canonical_voucher.status = determine_initial_status(
+                    voucher_code=code,
+                    start_time_str=canonical_voucher.start_time,
+                    end_time_str=canonical_voucher.end_time,
+                    confidence_score=canonical_voucher.confidence_score,
+                    claim_type="CODE"
+                )
                 revealed_code = True
 
             # Cập nhật thông tin thời gian và bằng chứng mới nhất
