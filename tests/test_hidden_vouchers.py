@@ -27,6 +27,11 @@ def setup_test_hidden_vouchers():
         "min_spend": 150000.0,
         "is_hidden": 1
     })
+    yield
+    conn = database.get_connection()
+    conn.execute("DELETE FROM vouchers WHERE id LIKE 'TEST_%'")
+    conn.commit()
+    conn.close()
 
 def test_hidden_voucher_priority_ranking():
     hidden_vouchers = database.get_vouchers(hidden_only=True)

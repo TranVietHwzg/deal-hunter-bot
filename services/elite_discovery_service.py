@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from models.scan_run import ScanMode
-from models.voucher import Voucher, VoucherStatus, ScopeType
+from models.voucher import Voucher, VoucherStatus, ScopeType, VerificationStatus
 from repositories.scan_repository import ScanRepository
 from repositories.voucher_repository import VoucherRepository
 from repositories.shop_repository import ShopRepository
@@ -112,18 +112,60 @@ class EliteDiscoveryService:
         events_to_notify: List[Dict[str, Any]] = []
 
         for item in collected_items:
-            # 1. Cổng lọc cứng Elite
-            is_elite, reason = is_elite_voucher(item)
+            # 1. Xác định verification_status của item
+            raw_vs = item.get("verification_status") or "UNVERIFIED"
+            try:
+                ver_status = VerificationStatus(raw_vs)
+            except Exception:
+                ver_status = VerificationStatus.UNVERIFIED
+
+            # 2. Cổng lọc cứng Elite (Yêu cầu đầy đủ bằng chứng)
+            is_elite, reason = is_elite_voucher(item, require_evidence=True)
+
+            code = item.get("voucher_code")
+            code = str(code).strip().upper() if code and str(code).strip() else None
+            start_t = str(item.get("start_time", ""))
+            end_t = str(item.get("end_time", ""))
+            scope = classify_scope(item)
+            cat_list = item.get("category_names") or ([item.get("category")] if item.get("category") else [])
+
+            # Nếu không đạt Elite:
             if not is_elite:
                 items_rejected += 1
+                # Vẫn lưu vào database nếu không phải freeship để phục vụ audit / unverified
+                if not item.get("is_freeship"):
+                    rej_model = Voucher(
+                        id=str(item.get("id") or item.get("voucher_id") or f"REJ_{code or 'NOCODE'}_{int(item.get('discount_value', 0))}"),
+                        platform="SHOPEE",
+                        voucher_code=code,
+                        verification_status=ver_status,
+                        title=str(item.get("title", "Shopee Voucher")),
+                        description=item.get("description"),
+                        scope_type=scope,
+                        discount_type=item.get("discount_type", "FIXED"),
+                        discount_value=float(item.get("discount_value", 0)),
+                        max_discount=float(item.get("max_discount")) if item.get("max_discount") is not None else None,
+                        min_order_value=float(item.get("min_order_value", 0)),
+                        start_time=start_t,
+                        end_time=end_t,
+                        status=VoucherStatus.UPCOMING_UNKNOWN_CODE if ver_status == VerificationStatus.UPCOMING_UNKNOWN_CODE else (VoucherStatus.UNVERIFIED if ver_status == VerificationStatus.UNVERIFIED else VoucherStatus.DISCOVERED),
+                        is_freeship=0,
+                        source_url=str(item.get("source_url") or item.get("claim_url") or "https://shopee.vn"),
+                        source_type=str(item.get("source_type") or "COMMUNITY_FEED"),
+                        source_title=item.get("source_title"),
+                        source_captured_at=item.get("source_captured_at"),
+                        source_evidence_excerpt=item.get("source_evidence_excerpt"),
+                        percentage_used=item.get("percentage_used")
+                    )
+                    self.voucher_repo.upsert(rej_model)
                 continue
 
-            # 2. Xác định shop có được theo dõi không
+            # 3. Xác định shop có được theo dõi không
             s_id = str(item.get("shop_id") or "").lower()
             s_name = str(item.get("shop_name") or "").lower()
             is_tracked = (s_id in tracked_shop_ids) or (s_name in tracked_shop_ids)
 
-            # 3. Chấm điểm 0-100
+            # 4. Chấm điểm 0-100
             score, label, breakdown = calculate_elite_score(
                 item,
                 is_tracked_shop=is_tracked,
@@ -135,19 +177,14 @@ class EliteDiscoveryService:
                 items_rejected += 1
                 continue
 
-            # 4. Khởi tạo model và trạng thái
-            code = item.get("voucher_code")
-            code = str(code).strip().upper() if code and str(code).strip() else None
-            start_t = str(item.get("start_time", ""))
-            end_t = str(item.get("end_time", ""))
-            scope = classify_scope(item)
+            # 5. Khởi tạo model Elite và trạng thái
             init_status = determine_initial_status(code, start_t, end_t, score)
 
-            cat_list = item.get("category_names") or ([item.get("category")] if item.get("category") else [])
             v_model = Voucher(
-                id=str(item.get("id") or item.get("voucher_id") or f"ELITE_{code or 'EVENT'}_{int(item.get('discount_value', 0))}"),
+                id=str(item.get("id") or item.get("voucher_id") or f"ELITE_{code}_{int(item.get('discount_value', 0))}"),
                 platform="SHOPEE",
                 voucher_code=code,
+                verification_status=ver_status,
                 title=str(item.get("title", "Shopee Elite Voucher")),
                 description=item.get("description"),
                 scope_type=scope,
@@ -165,7 +202,13 @@ class EliteDiscoveryService:
                 status=init_status,
                 is_freeship=0,
                 source_url=str(item.get("source_url") or item.get("claim_url") or "https://shopee.vn"),
-                source_type=str(item.get("source_type") or "CAMPAIGN_PAGE"),
+                source_type=str(item.get("source_type") or "COMMUNITY_FEED"),
+                source_title=item.get("source_title"),
+                source_captured_at=item.get("source_captured_at"),
+                source_evidence_excerpt=item.get("source_evidence_excerpt"),
+                verified_at=item.get("verified_at"),
+                last_checked_at=item.get("last_checked_at"),
+                percentage_used=item.get("percentage_used"),
                 confidence_score=score
             )
 
@@ -178,9 +221,6 @@ class EliteDiscoveryService:
                 elite_new += 1
                 if v_model.status == VoucherStatus.UPCOMING_CODE_KNOWN:
                     events_to_notify.append({"type": "UPCOMING_KNOWN", "voucher": v_model, "score": score, "label": label})
-                elif v_model.status == VoucherStatus.UPCOMING_UNKNOWN_CODE:
-                    # Chỉ thông báo khi sự kiện dự kiến có khả năng đạt chuẩn Elite
-                    events_to_notify.append({"type": "UPCOMING_UNKNOWN", "voucher": v_model, "score": score, "label": label})
                 elif v_model.status == VoucherStatus.ACTIVE:
                     events_to_notify.append({"type": "ACTIVE_NEW", "voucher": v_model, "score": score, "label": label})
             else:

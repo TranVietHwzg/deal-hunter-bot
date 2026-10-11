@@ -22,6 +22,15 @@ class VoucherStatus(str, Enum):
     CANCELLED = "CANCELLED"
     UNVERIFIED = "UNVERIFIED"
 
+class VerificationStatus(str, Enum):
+    VERIFIED_ACTIVE = "VERIFIED_ACTIVE"
+    VERIFIED_UPCOMING = "VERIFIED_UPCOMING"
+    UPCOMING_UNKNOWN_CODE = "UPCOMING_UNKNOWN_CODE"
+    PERSONAL_ELIGIBILITY_UNKNOWN = "PERSONAL_ELIGIBILITY_UNKNOWN"
+    UNVERIFIED = "UNVERIFIED"
+    INVALID = "INVALID"
+    TEST_DATA = "TEST_DATA"
+
 @dataclass
 class Voucher:
     id: str
@@ -36,6 +45,10 @@ class Voucher:
     source_type: str
     platform: str = "SHOPEE"
     voucher_code: Optional[str] = None
+    verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
+    source_title: Optional[str] = None
+    source_captured_at: Optional[str] = None
+    source_evidence_excerpt: Optional[str] = None
     description: Optional[str] = None
     shop_id: Optional[str] = None
     shop_name: Optional[str] = None
@@ -48,6 +61,9 @@ class Voucher:
     confidence_score: int = 90
     first_seen_at: Optional[str] = None
     last_seen_at: Optional[str] = None
+    verified_at: Optional[str] = None
+    last_checked_at: Optional[str] = None
+    percentage_used: Optional[float] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -56,27 +72,34 @@ class Voucher:
             "id": self.id,
             "platform": self.platform,
             "voucher_code": self.voucher_code,
+            "verification_status": self.verification_status.value if isinstance(self.verification_status, VerificationStatus) else str(self.verification_status),
             "title": self.title,
             "description": self.description,
-            "scope_type": self.scope_type.value if isinstance(self.scope_type, ScopeType) else self.scope_type,
+            "scope_type": self.scope_type.value if isinstance(self.scope_type, ScopeType) else str(self.scope_type),
             "shop_id": self.shop_id,
             "shop_name": self.shop_name,
             "shop_url": self.shop_url,
             "category_names": self.category_names,
-            "discount_type": self.discount_type.value if isinstance(self.discount_type, DiscountType) else self.discount_type,
+            "discount_type": self.discount_type.value if isinstance(self.discount_type, DiscountType) else str(self.discount_type),
             "discount_value": self.discount_value,
             "max_discount": self.max_discount,
             "min_order_value": self.min_order_value,
             "start_time": self.start_time,
             "end_time": self.end_time,
             "timezone": self.timezone,
-            "status": self.status.value if isinstance(self.status, VoucherStatus) else self.status,
+            "status": self.status.value if isinstance(self.status, VoucherStatus) else str(self.status),
             "is_freeship": self.is_freeship,
             "source_url": self.source_url,
             "source_type": self.source_type,
+            "source_title": self.source_title,
+            "source_captured_at": self.source_captured_at,
+            "source_evidence_excerpt": self.source_evidence_excerpt,
             "confidence_score": self.confidence_score,
             "first_seen_at": self.first_seen_at,
             "last_seen_at": self.last_seen_at,
+            "verified_at": self.verified_at,
+            "last_checked_at": self.last_checked_at,
+            "percentage_used": self.percentage_used,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }

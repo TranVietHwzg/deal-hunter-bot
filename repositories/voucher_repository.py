@@ -2,9 +2,16 @@ import json
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from repositories.base_repository import BaseRepository
-from models.voucher import Voucher, ScopeType, DiscountType, VoucherStatus
+from models.voucher import Voucher, ScopeType, DiscountType, VoucherStatus, VerificationStatus
 
 class VoucherRepository(BaseRepository):
+    def __init__(self, db_path: Optional[str] = None):
+        if db_path is not None:
+            super().__init__(db_path)
+        else:
+            super().__init__()
+        self.init_schema()
+
     def init_schema(self) -> None:
         """Đảm bảo các bảng vouchers và voucher_changes đã tồn tại theo schema mới"""
         with self.transaction() as cur:
@@ -55,7 +62,14 @@ class VoucherRepository(BaseRepository):
                 "source_type": "TEXT DEFAULT 'CAMPAIGN_PAGE'",
                 "confidence_score": "INTEGER DEFAULT 90",
                 "first_seen_at": "TEXT",
-                "last_seen_at": "TEXT"
+                "last_seen_at": "TEXT",
+                "verification_status": "TEXT DEFAULT 'UNVERIFIED'",
+                "source_title": "TEXT",
+                "source_captured_at": "TEXT",
+                "source_evidence_excerpt": "TEXT",
+                "verified_at": "TEXT",
+                "last_checked_at": "TEXT",
+                "percentage_used": "REAL"
             }
             for col_name, col_type in new_cols.items():
                 if col_name not in cols:
@@ -122,10 +136,17 @@ class VoucherRepository(BaseRepository):
         }
         status_val = status_map.get(raw_status, VoucherStatus.DISCOVERED)
 
+        raw_vstatus = str(row.get("verification_status") or "UNVERIFIED").upper()
+        try:
+            vstatus_val = VerificationStatus(raw_vstatus)
+        except ValueError:
+            vstatus_val = VerificationStatus.UNVERIFIED
+
         return Voucher(
             id=row["id"],
             platform=row.get("platform") or "SHOPEE",
             voucher_code=row.get("voucher_code"),
+            verification_status=vstatus_val,
             title=row["title"],
             description=row.get("description"),
             scope_type=scope_val,
@@ -144,9 +165,15 @@ class VoucherRepository(BaseRepository):
             is_freeship=int(row.get("is_freeship") or 0),
             source_url=row.get("source_url") or row.get("claim_url") or "https://shopee.vn",
             source_type=row.get("source_type") or "CAMPAIGN_PAGE",
+            source_title=row.get("source_title"),
+            source_captured_at=row.get("source_captured_at"),
+            source_evidence_excerpt=row.get("source_evidence_excerpt"),
             confidence_score=int(row.get("confidence_score") or 90),
             first_seen_at=row.get("first_seen_at"),
             last_seen_at=row.get("last_seen_at"),
+            verified_at=row.get("verified_at"),
+            last_checked_at=row.get("last_checked_at"),
+            percentage_used=float(row["percentage_used"]) if row.get("percentage_used") is not None else None,
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
         )
@@ -222,6 +249,13 @@ class VoucherRepository(BaseRepository):
                     "end_time": voucher.end_time,
                     "timezone": voucher.timezone,
                     "status": voucher.status.value if isinstance(voucher.status, VoucherStatus) else voucher.status,
+                    "verification_status": voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else str(voucher.verification_status),
+                    "source_title": voucher.source_title,
+                    "source_captured_at": voucher.source_captured_at,
+                    "source_evidence_excerpt": voucher.source_evidence_excerpt,
+                    "verified_at": voucher.verified_at,
+                    "last_checked_at": voucher.last_checked_at or datetime.now(timezone.utc).isoformat(),
+                    "percentage_used": voucher.percentage_used,
                     "claim_url": voucher.source_url,
                     "source_url": voucher.source_url,
                     "source_type": voucher.source_type,
@@ -244,6 +278,7 @@ class VoucherRepository(BaseRepository):
                     "platform_id": voucher.platform,
                     "voucher_id_on_platform": voucher.id,
                     "voucher_code": voucher.voucher_code,
+                    "verification_status": voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else str(voucher.verification_status),
                     "title": voucher.title,
                     "description": voucher.description,
                     "scope_type": voucher.scope_type.value if isinstance(voucher.scope_type, ScopeType) else voucher.scope_type,
@@ -267,6 +302,12 @@ class VoucherRepository(BaseRepository):
                     "claim_url": voucher.source_url,
                     "source_url": voucher.source_url,
                     "source_type": voucher.source_type,
+                    "source_title": voucher.source_title,
+                    "source_captured_at": voucher.source_captured_at,
+                    "source_evidence_excerpt": voucher.source_evidence_excerpt,
+                    "verified_at": voucher.verified_at,
+                    "last_checked_at": voucher.last_checked_at or datetime.now(timezone.utc).isoformat(),
+                    "percentage_used": voucher.percentage_used,
                     "confidence_score": voucher.confidence_score,
                     "first_seen_at": datetime.now(timezone.utc).isoformat(),
                     "last_seen_at": datetime.now(timezone.utc).isoformat(),
@@ -350,3 +391,67 @@ class VoucherRepository(BaseRepository):
     def get_all_vouchers(self, limit: int = 100) -> List[Voucher]:
         """Lấy tất cả vouchers không phải freeship"""
         return self.get_vouchers(limit=limit)
+
+    def get_by_code(self, voucher_code: str) -> Optional[Voucher]:
+        """Tìm voucher theo mã code chính xác"""
+        if not voucher_code:
+            return None
+        code_clean = str(voucher_code).strip().upper()
+        with self.transaction() as cur:
+            row = cur.execute(
+                "SELECT * FROM vouchers WHERE UPPER(voucher_code) = ? LIMIT 1",
+                (code_clean,)
+            ).fetchone()
+            if row:
+                return self._row_to_voucher(dict(row))
+        return None
+
+    def get_elite_verified_vouchers(self, limit: int = 50) -> List[Voucher]:
+        """Lấy danh sách voucher đạt chuẩn xác minh VERIFIED_ACTIVE hoặc VERIFIED_UPCOMING"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT * FROM vouchers 
+            WHERE is_freeship = 0 
+              AND verification_status IN ('VERIFIED_ACTIVE', 'VERIFIED_UPCOMING')
+            ORDER BY (verification_status = 'VERIFIED_ACTIVE') DESC, discount_value DESC
+            LIMIT ?
+            """, (limit,)).fetchall()
+            return [self._row_to_voucher(dict(r)) for r in rows]
+
+    def get_unverified_vouchers(self, limit: int = 50) -> List[Voucher]:
+        """Lấy danh sách voucher UNVERIFIED đang chờ kiểm tra"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT * FROM vouchers 
+            WHERE is_freeship = 0 
+              AND verification_status = 'UNVERIFIED'
+            ORDER BY discount_value DESC
+            LIMIT ?
+            """, (limit,)).fetchall()
+            return [self._row_to_voucher(dict(r)) for r in rows]
+
+    def get_verification_audit_summary(self) -> Dict[str, int]:
+        """Thống kê số lượng voucher theo từng trạng thái xác minh"""
+        summary = {
+            "VERIFIED_ACTIVE": 0,
+            "VERIFIED_UPCOMING": 0,
+            "UPCOMING_UNKNOWN_CODE": 0,
+            "PERSONAL_ELIGIBILITY_UNKNOWN": 0,
+            "UNVERIFIED": 0,
+            "INVALID": 0,
+            "TEST_DATA": 0,
+            "TOTAL": 0
+        }
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT verification_status, count(*) as cnt 
+            FROM vouchers 
+            GROUP BY verification_status
+            """).fetchall()
+            for r in rows:
+                st = str(r["verification_status"] or "UNVERIFIED")
+                count = int(r["cnt"])
+                summary[st] = count
+                summary["TOTAL"] += count
+        return summary
+

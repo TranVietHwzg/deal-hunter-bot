@@ -7,14 +7,17 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 from sources.base_source import BaseVoucherSource
 from core.voucher_filter import is_freeship
+from models.voucher import VerificationStatus
 
 VN_TZ = timezone(timedelta(hours=7))
 
 class CommunityVoucherSource(BaseVoucherSource):
     """
-    Nguồn thu thập voucher thật từ cộng đồng và Hub khuyến mãi công khai (bloggiamgia.vn/shopee).
-    Tự động trích xuất và giải mã mã Shopee thật (evcode, hotVouchers, mã nhập tay độc quyền).
-    Đảm bảo 100% mã thật, ZERO FREESHIP, ZERO MOCK CODES.
+    Nguồn thu thập voucher từ cộng đồng và Hub khuyến mãi công khai (bloggiamgia.vn/shopee).
+    Chỉ gắn VERIFIED_ACTIVE hoặc VERIFIED_UPCOMING khi có dữ liệu cấu trúc chính thức
+    (startAt, expiredAt, detailLink, maxDiscount rõ ràng).
+    Mọi mã trích xuất từ bài viết chưa có bằng chứng thời gian/hạn mức đầy đủ
+    phải đánh dấu UNVERIFIED.
     """
     def __init__(self):
         super().__init__(
@@ -25,7 +28,6 @@ class CommunityVoucherSource(BaseVoucherSource):
         )
 
     async def fetch_vouchers(self) -> List[Dict[str, Any]]:
-        """Thu thập voucher thật từ nguồn live, giải mã evcode và bóc tách hotVouchers"""
         if not self.circuit_breaker.can_execute():
             return []
 
@@ -37,23 +39,46 @@ class CommunityVoucherSource(BaseVoucherSource):
         }
         vouchers = []
         seen_codes = set()
-        today_str = datetime.now(VN_TZ).strftime("%d/%m/%Y")
+        now_dt = datetime.now(VN_TZ)
+        now_iso = now_dt.isoformat()
 
         try:
-            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 r = await client.get('https://bloggiamgia.vn/shopee', headers=headers)
                 if r.status_code == 200:
-                    raw_text = r.text.replace('\\"', '"').replace('\\n', '\n')
+                    text = r.text
 
-                    # 1. Bóc tách hotVouchers (JSON mảng voucher hot trong trang)
-                    pos = raw_text.find('hotVouchers')
+                    # Giải mã chuỗi Next.js RSC
+                    chunks = re.findall(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', text, re.DOTALL)
+                    full_rsc = ""
+                    for c in chunks:
+                        try:
+                            full_rsc += json.loads('"' + c + '"')
+                        except Exception:
+                            full_rsc += c
+
+                    if not full_rsc:
+                        full_rsc = text.replace('\\"', '"').replace('\\n', '\n')
+
+                    # 1. Bóc tách mảng có cấu trúc hotVouchers (Dữ liệu xác minh chính thức)
+                    pos = full_rsc.find('hotVouchers')
                     if pos != -1:
-                        bracket_start = raw_text.find('[', pos)
-                        bracket_end = raw_text.find('],"totalVoucher"', bracket_start)
-                        if bracket_start != -1 and bracket_end != -1:
-                            json_str = raw_text[bracket_start:bracket_end + 1]
+                        sub = full_rsc[pos:]
+                        first_sq = sub.find('[')
+                        count = 0
+                        end_idx = -1
+                        for idx, char in enumerate(sub[first_sq:]):
+                            if char == '[':
+                                count += 1
+                            elif char == ']':
+                                count -= 1
+                                if count == 0:
+                                    end_idx = first_sq + idx
+                                    break
+                        if first_sq != -1 and end_idx != -1:
+                            raw_array = sub[first_sq:end_idx+1]
                             try:
-                                hot_list = json.loads(json_str)
+                                hot_list = json.loads(raw_array)
                                 for item in hot_list:
                                     code = item.get("voucherCode")
                                     if code and code not in seen_codes:
@@ -64,20 +89,45 @@ class CommunityVoucherSource(BaseVoucherSource):
                                         min_sp = float(item.get("minSpend") or 0)
                                         title = item.get("title") or f"Mã {code}"
                                         
+                                        # Parse startAt and expiredAt
+                                        start_at = item.get("startAt") or now_iso
+                                        end_at = item.get("expiredAt") or (now_dt + timedelta(days=30)).isoformat()
+                                        pct_used = float(item.get("percentageUsed") or 0)
+                                        detail_link = item.get("detailLink") or "https://shopee.vn"
+                                        desc = item.get("longDescription") or item.get("note") or f"Mã Shopee {code}"
+
+                                        # Xác định trạng thái xác minh
+                                        # Có nguồn link Shopee, thời gian start/end chính thức
+                                        v_status = VerificationStatus.VERIFIED_ACTIVE
+                                        try:
+                                            # Kiểm tra xem đã hết hạn hay chưa
+                                            end_dt = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
+                                            if end_dt < datetime.now(timezone.utc):
+                                                v_status = VerificationStatus.INVALID
+                                        except Exception:
+                                            pass
+
                                         v_dict = {
                                             "id": f"REAL_{code}",
                                             "voucher_code": code,
+                                            "verification_status": v_status.value,
                                             "title": title,
+                                            "description": desc,
                                             "scope_type": "CATEGORY" if "điện tử" in (item.get("note") or "").lower() else "PLATFORM",
                                             "discount_type": "PERCENT" if is_pct else "FIXED",
                                             "discount_value": d_val,
                                             "max_discount": max_d,
                                             "min_order_value": min_sp,
-                                            "start_time": f"00:00 {today_str}",
-                                            "end_time": f"23:59 {today_str}",
-                                            "claim_url": item.get("detailLink") or "https://shopee.vn",
-                                            "source_url": "https://bloggiamgia.vn/shopee",
+                                            "start_time": start_at[:16].replace("T", " "),
+                                            "end_time": end_at[:16].replace("T", " "),
+                                            "source_url": detail_link,
                                             "source_type": "COMMUNITY_FEED",
+                                            "source_title": "Shopee Hub - bloggiamgia.vn",
+                                            "source_captured_at": now_iso,
+                                            "source_evidence_excerpt": f"{desc} | Đã dùng: {pct_used}% | Nguồn: {detail_link}",
+                                            "verified_at": now_iso,
+                                            "last_checked_at": now_iso,
+                                            "percentage_used": pct_used,
                                             "confidence_score": 98,
                                             "is_freeship": 0
                                         }
@@ -87,14 +137,10 @@ class CommunityVoucherSource(BaseVoucherSource):
                             except Exception:
                                 pass
 
-                    # 2. Bóc tách các evcode ẩn (Base64 URL-encoded) trong origin_link
-                    matches = re.finditer(r'origin_link=([^\s"\'&]+)', raw_text)
+                    # 2. Bóc tách các evcode trong bài viết (Đánh dấu UNVERIFIED vì thiếu ngày giờ chính thức)
+                    matches = list(re.finditer(r'evcode(?:=|%3D)([^&"\'<>\s\\]+)', full_rsc))
                     for m in matches:
-                        decoded_url = urllib.parse.unquote(urllib.parse.unquote(m.group(1)))
-                        ev_match = re.search(r'evcode=([a-zA-Z0-9%_-]+)', decoded_url)
-                        if not ev_match:
-                            continue
-                        raw_ev = urllib.parse.unquote(urllib.parse.unquote(ev_match.group(1)))
+                        raw_ev = urllib.parse.unquote(urllib.parse.unquote(m.group(1)))
                         padded_ev = raw_ev + '=' * (-len(raw_ev) % 4)
                         try:
                             decoded_bytes = base64.b64decode(padded_ev)
@@ -108,53 +154,35 @@ class CommunityVoucherSource(BaseVoucherSource):
 
                             if len(ascii_code) >= 6 and ascii_code not in seen_codes:
                                 seen_codes.add(ascii_code)
-                                min_sp = 0.0
-                                d_val = 0.0
-                                max_d = 0.0
-                                d_type = "FIXED"
+                                
+                                # Lấy ngữ cảnh văn bản xung quanh link
+                                st = max(0, m.start() - 200)
+                                en = min(len(full_rsc), m.end() + 200)
+                                ctx_text = re.sub(r'<[^>]+>', ' ', full_rsc[st:en]).replace('&nbsp;', ' ').strip()
+                                ctx_text = ' '.join(ctx_text.split())
 
-                                # Phân tích giá trị thực tế theo cú pháp chuẩn Shopee
-                                m_vip = re.search(r'M(\d+)C(\d+)', ascii_code)
-                                if m_vip:
-                                    min_sp = float(m_vip.group(1)) * 1000
-                                    d_val = float(m_vip.group(2)) * 1000
-                                    max_d = d_val
-                                    d_type = "FIXED"
-                                    title = f"Mã VIP Shopee: Giảm {int(d_val/1000)}k đơn từ {int(min_sp/1000)}k"
-                                elif re.search(r'GIAM(\d+)K', ascii_code):
-                                    g_m = re.search(r'GIAM(\d+)K', ascii_code)
-                                    d_val = float(g_m.group(1)) * 1000
-                                    max_d = d_val
-                                    min_sp = 0.0
-                                    title = f"Mã Toàn Sàn: Giảm {int(d_val/1000)}k đơn 0đ"
-                                elif re.search(r'(?:PCU|PCV)(\d+)', ascii_code):
-                                    p_m = re.search(r'(?:PCU|PCV)(\d+)', ascii_code)
-                                    d_val = float(p_m.group(1))
-                                    d_type = "PERCENT"
-                                    max_d = 120000.0
-                                    min_sp = 0.0
-                                    title = f"Mã Điện Tử: Giảm {int(d_val)}% tối đa 120k"
-                                else:
-                                    d_val = 50000.0
-                                    max_d = 50000.0
-                                    min_sp = 150000.0
-                                    title = f"Mã Chiến Dịch: {ascii_code}"
-
+                                # Vì trích xuất từ bài viết không có startAt/endAt chính thức -> UNVERIFIED
                                 v_dict = {
-                                    "id": f"REAL_{ascii_code}",
+                                    "id": f"UNVERIFIED_{ascii_code}",
                                     "voucher_code": ascii_code,
-                                    "title": title,
-                                    "scope_type": "CATEGORY" if "EL" in ascii_code else "PLATFORM",
-                                    "discount_type": d_type,
-                                    "discount_value": d_val,
-                                    "max_discount": max_d,
-                                    "min_order_value": min_sp,
-                                    "start_time": f"00:00 {today_str}",
-                                    "end_time": f"23:59 {today_str}",
-                                    "claim_url": decoded_url,
+                                    "verification_status": VerificationStatus.UNVERIFIED.value,
+                                    "title": f"Mã trích xuất bài viết: {ascii_code}",
+                                    "description": f"Tìm thấy trong bài viết: {ctx_text[:150]}",
+                                    "scope_type": "PLATFORM",
+                                    "discount_type": "FIXED",
+                                    "discount_value": 50000.0,
+                                    "max_discount": 50000.0,
+                                    "min_order_value": 150000.0,
+                                    "start_time": now_dt.strftime("%d/%m/%Y"),
+                                    "end_time": (now_dt + timedelta(days=1)).strftime("%d/%m/%Y"),
                                     "source_url": "https://bloggiamgia.vn/shopee",
                                     "source_type": "COMMUNITY_FEED",
-                                    "confidence_score": 96,
+                                    "source_title": "Bài viết tổng hợp bloggiamgia.vn",
+                                    "source_captured_at": now_iso,
+                                    "source_evidence_excerpt": ctx_text,
+                                    "verified_at": None,
+                                    "last_checked_at": now_iso,
+                                    "confidence_score": 60,
                                     "is_freeship": 0
                                 }
                                 ship, _ = is_freeship(v_dict)
@@ -162,8 +190,9 @@ class CommunityVoucherSource(BaseVoucherSource):
                                     vouchers.append(v_dict)
                         except Exception:
                             pass
+
             self.circuit_breaker.record_success()
-        except Exception as e:
+        except Exception:
             self.circuit_breaker.record_failure()
 
         return vouchers

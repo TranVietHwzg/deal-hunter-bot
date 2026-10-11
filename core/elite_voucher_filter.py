@@ -1,6 +1,6 @@
 import re
 from typing import Dict, Any, Tuple, Optional
-from models.voucher import Voucher, DiscountType
+from models.voucher import Voucher, DiscountType, VerificationStatus
 
 # Danh sách từ khóa cấm tuyệt đối (Freeship / Vận chuyển)
 FREESHIP_KEYWORDS = [
@@ -63,12 +63,14 @@ def extract_voucher_fields(data: Dict[str, Any] or Voucher) -> Tuple[str, float,
 
 def is_elite_voucher(
     data: Dict[str, Any] or Voucher,
-    allow_new_user: bool = False
+    allow_new_user: bool = False,
+    require_evidence: bool = False
 ) -> Tuple[bool, str]:
     """
     Cổng lọc cứng kiểm duyệt Elite Shopee Voucher Radar:
     - Loại bỏ 100% Freeship
     - Loại bỏ mã người dùng mới nếu allow_new_user = False
+    - Kiểm tra bằng chứng bắt buộc (source_url, start_time, end_time, verification_status)
     - Nhánh 1: Mã giảm tiền cố định:
         A. discount_value >= 30.000đ và min_order_value == 0đ
         B. discount_value >= 50.000đ và min_order_value / discount_value <= 3.0
@@ -86,6 +88,57 @@ def is_elite_voucher(
     # 2. Chặn New User
     if not allow_new_user and is_new_user_voucher(data):
         return False, "Loại: Voucher chỉ dành cho người dùng mới"
+
+    # 3. Kiểm tra bằng chứng và trạng thái xác minh (Verification Status)
+    if isinstance(data, Voucher):
+        v_status = data.verification_status
+        src_url = data.source_url
+        start_t = data.start_time
+        end_t = data.end_time
+        v_code = data.voucher_code
+        has_status_field = True
+    else:
+        v_status = data.get("verification_status")
+        src_url = data.get("source_url") or data.get("claim_url")
+        start_t = data.get("start_time")
+        end_t = data.get("end_time")
+        v_code = data.get("voucher_code")
+        has_status_field = "verification_status" in data or "source_url" in data or "start_time" in data or require_evidence
+
+    # Nếu voucher có trường trạng thái xác minh hoặc yêu cầu bằng chứng:
+    if has_status_field or require_evidence:
+        # A. Cấm tuyệt đối TEST_DATA / MOCK / SEED
+        if v_status in (VerificationStatus.TEST_DATA, "TEST_DATA"):
+            return False, "Loại: Mã kiểm thử/mock/seed (TEST_DATA)"
+
+        # B. Cấm INVALID / EXPIRED
+        if v_status in (VerificationStatus.INVALID, "INVALID") or str(data.get("status") if isinstance(data, dict) else data.status.value).upper() == "EXPIRED":
+            return False, "Loại: Voucher bị đánh dấu INVALID hoặc EXPIRED"
+
+        # C. Cấm UNVERIFIED
+        if v_status in (VerificationStatus.UNVERIFIED, "UNVERIFIED"):
+            return False, "Loại: Chưa có bằng chứng xác minh (UNVERIFIED)"
+
+        # D. Cấm PERSONAL_ELIGIBILITY_UNKNOWN vào Elite tự động
+        if v_status in (VerificationStatus.PERSONAL_ELIGIBILITY_UNKNOWN, "PERSONAL_ELIGIBILITY_UNKNOWN"):
+            return False, "Loại: Chưa xác minh điều kiện tài khoản cá nhân (PERSONAL_ELIGIBILITY_UNKNOWN)"
+
+        # E. Cấm UPCOMING_UNKNOWN_CODE (chưa có code thật)
+        if v_status in (VerificationStatus.UPCOMING_UNKNOWN_CODE, "UPCOMING_UNKNOWN_CODE") or not v_code:
+            return False, "Loại: Chưa có mã voucher code (UPCOMING_UNKNOWN_CODE)"
+
+        # F. Kiểm tra source_url
+        if not src_url or not str(src_url).strip() or str(src_url).strip() in ("None", ""):
+            return False, "Loại: Thiếu source_url bằng chứng hợp lệ"
+
+        # G. Kiểm tra start_time và end_time
+        if not start_t or not str(start_t).strip() or not end_t or not str(end_t).strip():
+            return False, "Loại: Thiếu start_time hoặc end_time hiệu lực rõ ràng"
+
+        # H. Chỉ cho phép VERIFIED_ACTIVE hoặc VERIFIED_UPCOMING
+        raw_vs = v_status.value if isinstance(v_status, VerificationStatus) else str(v_status)
+        if raw_vs not in ("VERIFIED_ACTIVE", "VERIFIED_UPCOMING"):
+            return False, f"Loại: Trạng thái xác minh '{raw_vs}' không đủ chuẩn Elite"
 
     dtype, dval, max_d, min_o = extract_voucher_fields(data)
 

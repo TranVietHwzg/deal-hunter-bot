@@ -380,7 +380,7 @@ def test_18_scan_now_returns_only_elite_vouchers():
             return [
                 {"id": "V_TRASH_1", "discount_type": "FIXED", "discount_value": 10000, "min_order_value": 0, "title": "Giảm 10k", "is_freeship": 0},
                 {"id": "V_SHIP_1", "discount_type": "FIXED", "discount_value": 50000, "min_order_value": 0, "title": "Freeship 50k", "is_freeship": 0},
-                {"id": v_id, "discount_type": "FIXED", "discount_value": 100000, "min_order_value": 0, "title": "Giảm 100k đơn 0đ", "is_freeship": 0, "start_time": "00:00 12/10/2026", "end_time": "23:59 12/10/2026", "source_type": "CAMPAIGN_PAGE"}
+                {"id": v_id, "voucher_code": "ELITE100K", "source_url": "https://shopee.vn/m/ma-giam-gia", "verification_status": "VERIFIED_ACTIVE", "discount_type": "FIXED", "discount_value": 100000, "min_order_value": 0, "title": "Giảm 100k đơn 0đ", "is_freeship": 0, "start_time": "00:00 12/10/2026", "end_time": "23:59 12/10/2026", "source_type": "CAMPAIGN_PAGE"}
             ]
         async def mock_empty():
             return []

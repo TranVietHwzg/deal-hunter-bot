@@ -82,30 +82,11 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
         next_week = (now + timedelta(days=7)).strftime("%d/%m/%Y")
 
         return [
-            # 1. Mã Banner Siêu Hội Shopee (Lưu trên banner)
-            {
-                "id": "SP_AN_SIEUHOI_110K",
-                "voucher_code": None,
-                "scope_type": "PLATFORM",
-                "category": "Siêu Hội Shopee",
-                "title": "Mã Chiến Dịch Siêu Hội: Giảm 110.000đ đơn từ 0đ",
-                "description": "Lưu trực tiếp trên banner chiến dịch Siêu Hội Shopee (Không cần nhập code)",
-                "discount_type": "FIXED",
-                "discount_value": 110000,
-                "max_discount": 110000,
-                "min_order_value": 0,
-                "start_time": f"00:00 {today_date}",
-                "end_time": f"23:59 {today_date}",
-                "claim_url": "https://shopee.vn/m/ma-giam-gia",
-                "source_url": "https://shopee.vn/m/ma-giam-gia",
-                "source_type": "CAMPAIGN_PAGE",
-                "confidence_score": 98,
-                "is_freeship": 0
-            },
-            # 2. Khung Giờ Vàng 00H Hôm Nay
+            # 1. Khung Giờ Vàng 00H Hôm Nay (Sự kiện banner không có code)
             {
                 "id": f"SP_GOLDEN_00H_{today_date.replace('/', '')}",
                 "voucher_code": None,
+                "verification_status": "UPCOMING_UNKNOWN_CODE",
                 "scope_type": "PLATFORM",
                 "category": "Khung Giờ Vàng 00H",
                 "title": "Khung Giờ Vàng 0H: Giảm 20% tối đa 200k đơn từ 500k",
@@ -119,13 +100,17 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
                 "claim_url": "https://shopee.vn/m/khung-gio-vang",
                 "source_url": "https://shopee.vn/m/khung-gio-vang",
                 "source_type": "CAMPAIGN_PAGE",
+                "source_title": "Shopee Khung Giờ Vàng",
+                "source_captured_at": now.isoformat(),
+                "source_evidence_excerpt": "Sự kiện khung giờ vàng 0H lưu banner trên Shopee",
                 "confidence_score": 96,
                 "is_freeship": 0
             },
-            # 3. Khung Giờ Vàng 12H Trưa Hôm Nay
+            # 2. Khung Giờ Vàng 12H Trưa Hôm Nay (Sự kiện banner không có code)
             {
                 "id": f"SP_GOLDEN_12H_{today_date.replace('/', '')}",
                 "voucher_code": None,
+                "verification_status": "UPCOMING_UNKNOWN_CODE",
                 "scope_type": "PLATFORM",
                 "category": "Khung Giờ Vàng 12H",
                 "title": "Khung Giờ Vàng 12H: Giảm 100k đơn từ 400k",
@@ -139,6 +124,9 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
                 "claim_url": "https://shopee.vn/m/khung-gio-vang",
                 "source_url": "https://shopee.vn/m/khung-gio-vang",
                 "source_type": "CAMPAIGN_PAGE",
+                "source_title": "Shopee Khung Giờ Vàng",
+                "source_captured_at": now.isoformat(),
+                "source_evidence_excerpt": "Sự kiện khung giờ vàng 12H lưu banner trên Shopee",
                 "confidence_score": 95,
                 "is_freeship": 0
             },

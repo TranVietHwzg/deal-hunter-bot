@@ -427,16 +427,36 @@ class TelegramBotService:
             await self.send_message(msg, reply_markup=markup)
             return
 
-        if text == "/status":
-            personal_msg = self.elite_discovery.personal_source.get_status_message()
-            status_msg = (
-                "📊 <b>TRẠNG THÁI ELITE SHOPEE RADAR</b>\n"
-                "────────────────────\n"
-                "• Chế độ: <b>ELITE VOUCHER RADAR (Ngưỡng >= 80đ)</b>\n"
-                "• Lọc Freeship: <b>KÍCH HOẠT (100% Loại trừ)</b>\n"
-                f"• {personal_msg}\n"
-            )
-            await self.send_message(status_msg, reply_markup=get_elite_main_keyboard())
+        if text.startswith("/verify"):
+            resp = await self.elite_commands.handle_verify_command(text)
+            await self.send_message(resp, reply_markup=get_elite_main_keyboard())
+            return
+
+        if text.startswith("/source"):
+            resp = await self.elite_commands.handle_source_command(text)
+            await self.send_message(resp, reply_markup=get_elite_main_keyboard())
+            return
+
+        if text == "/status" or text.startswith("/status "):
+            resp = await self.elite_commands.handle_status_command(text)
+            await self.send_message(resp, reply_markup=get_elite_main_keyboard())
+            return
+
+        if text == "/elite":
+            msg, markup = await self.elite_commands.handle_elite_command()
+            await self.send_message(msg, reply_markup=markup)
+            return
+
+        if text == "/unverified":
+            msg, markup = await self.elite_commands.handle_unverified_command()
+            await self.send_message(msg, reply_markup=markup)
+            return
+
+        if text == "/audit":
+            resp = await self.elite_commands.handle_audit_command()
+            await self.send_message(resp, reply_markup=get_elite_main_keyboard())
+            return
+
         if text.startswith("/leak") or text.startswith("/nhapma"):
             resp_msg = await self.elite_commands.handle_leak_command(text)
             await self.send_message(resp_msg, reply_markup=get_elite_main_keyboard())

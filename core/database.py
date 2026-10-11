@@ -419,9 +419,6 @@ def upsert_voucher(voucher_data: Dict[str, Any]) -> bool:
         voucher_data.get("is_hidden") == 1 
         or "ẨN" in title.upper() 
         or "AN" in category.upper()
-        or "SIEUHOI" in v_code.upper()
-        or "SIÊU HỘI" in category.upper()
-        or "SIÊU HỘI" in title.upper()
     ) else 0
     is_hot = 1 if (d_val >= 100000 or (d_type in ["PERCENTAGE", "PERCENT"] and d_val >= 15)) else 0
 
