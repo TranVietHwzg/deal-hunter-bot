@@ -65,6 +65,7 @@ async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
 def calculate_adaptive_interval() -> int:
     """
     Tính toán khoảng thời gian ngủ thích ứng (Adaptive Interval):
+    - Có mã sắp mở trong < 5 phút: quét mỗi 30s (chống miss mã 0đ)
     - Có mã sắp mở trong < 30 phút: quét mỗi 5 phút (300s)
     - Có mã sắp mở trong < 24 giờ: quét mỗi 15 phút (900s)
     - Bình thường: quét mỗi 60 phút (3600s)
@@ -83,6 +84,8 @@ def calculate_adaptive_interval() -> int:
                 min_diff = diff
 
     if min_diff is not None:
+        if min_diff <= 5 * 60:
+            return 30  # 30 giây, chống miss mã 100k/0đ
         if min_diff <= 30 * 60:
             return 300  # 5 phút
         elif min_diff <= 24 * 3600:

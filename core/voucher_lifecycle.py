@@ -105,8 +105,9 @@ def evaluate_lifecycle_transition(voucher: Voucher) -> Tuple[Optional[VoucherSta
 
 def check_upcoming_reminder(voucher: Voucher) -> Optional[str]:
     """
-    Kiểm tra xem voucher sắp mở có cần gửi nhắc nhở T-15m hoặc T-2m không.
-    Trả về 'REMINDER_15M', 'REMINDER_2M', hoặc None.
+    Kiểm tra xem voucher sắp mở có cần gửi nhắc nhở không.
+    Trả về 'REMINDER_60M', 'REMINDER_15M', 'REMINDER_5M', 'REMINDER_2M', hoặc None.
+    Giữ tương thích ngược: mã thường vẫn chỉ bắn 15M/2M.
     """
     if voucher.status != VoucherStatus.UPCOMING_CODE_KNOWN or not voucher.voucher_code:
         return None
@@ -117,8 +118,12 @@ def check_upcoming_reminder(voucher: Voucher) -> Optional[str]:
         return None
 
     diff_seconds = (start_dt - now).total_seconds()
-    if 2 * 60 < diff_seconds <= 15 * 60:
+    if 15 * 60 < diff_seconds <= 60 * 60:
+        return "REMINDER_60M"
+    if 5 * 60 < diff_seconds <= 15 * 60:
         return "REMINDER_15M"
+    if 2 * 60 < diff_seconds <= 5 * 60:
+        return "REMINDER_5M"
     elif 0 < diff_seconds <= 2 * 60:
         return "REMINDER_2M"
 

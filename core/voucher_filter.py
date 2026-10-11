@@ -62,6 +62,66 @@ def is_worthy_voucher(
 
     return False
 
+
+def _get_numbers(voucher: Voucher or Dict[str, Any]):
+    if isinstance(voucher, Voucher):
+        dtype = voucher.discount_type.value if isinstance(voucher.discount_type, DiscountType) else str(voucher.discount_type)
+        dval = float(voucher.discount_value)
+        max_d = float(voucher.max_discount) if voucher.max_discount is not None else dval
+        min_o = float(voucher.min_order_value or 0)
+    else:
+        dtype = str(voucher.get("discount_type", "FIXED")).upper()
+        dval = float(voucher.get("discount_value", 0))
+        max_d = float(voucher.get("max_discount", 0) or voucher.get("max_discount_amount", 0) or dval)
+        min_o = float(voucher.get("min_order_value", 0) or voucher.get("min_spend", 0) or 0)
+    return dtype.upper(), dval, max_d, min_o
+
+
+def is_super_voucher(voucher: Voucher or Dict[str, Any]) -> Tuple[bool, str]:
+    """Mã siêu ngon: 100k/50k/30%+ mà đơn 0đ hoặc rẻ.
+    Dùng để ưu tiên nhắc giờ, không thay thế is_worthy_voucher.
+    """
+    dtype, dval, max_d, min_o = _get_numbers(voucher)
+    if dtype in ("FIXED", "FIXED_AMOUNT"):
+        if dval >= 100000 and min_o <= 100000:
+            return True, "SUPER_100K_0D"
+        if dval >= 50000 and min_o <= 50000:
+            return True, "SUPER_50K_0D"
+        if dval >= 30000 and min_o == 0:
+            return True, "SUPER_30K_0D"
+    elif dtype in ("PERCENT", "PERCENTAGE"):
+        if dval >= 30 and max_d >= 100000:
+            return True, "SUPER_30PCT"
+        if dval >= 20 and max_d >= 150000 and min_o <= 400000:
+            return True, "SUPER_20PCT"
+    return False, ""
+
+
+def score_voucher(voucher: Voucher or Dict[str, Any]) -> int:
+    """Chấm 0-100 để xếp hạng /top: đơn càng rẻ + giảm càng to càng cao."""
+    dtype, dval, max_d, min_o = _get_numbers(voucher)
+    if dtype in ("FIXED", "FIXED_AMOUNT"):
+        real = dval
+    else:
+        real = max_d
+    if real <= 0:
+        return 0
+    # Điểm gốc theo giá trị thật
+    base = min(70, real / 200000 * 70)
+    # Thưởng đơn rẻ
+    if min_o == 0:
+        base += 30
+    elif min_o <= 50000:
+        base += 20
+    elif min_o <= 200000:
+        base += 10
+    elif min_o > real * 8:
+        base -= 20
+    # Thưởng % cao
+    if dtype in ("PERCENT", "PERCENTAGE") and dval >= 30:
+        base += 10
+    return max(0, min(100, int(base)))
+
 def validate_voucher_for_radar(data: Dict[str, Any] or Voucher) -> Tuple[bool, str]:
     """Kiểm tra tính hợp lệ toàn diện của voucher trước khi lưu vào Radar"""
     is_ship, reason = is_freeship(data)

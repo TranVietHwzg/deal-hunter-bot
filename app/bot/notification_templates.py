@@ -19,6 +19,30 @@ def format_scope_display(voucher: Voucher) -> str:
         return f"Ngành hàng ({cats})"
     return "Toàn sàn"
 
+
+def format_super_badge(voucher: Voucher) -> str:
+    """Nhãn mã siêu ngon đơn 0đ / rẻ, không auto-claim."""
+    try:
+        from core.voucher_filter import is_super_voucher, score_voucher
+        is_super, kind = is_super_voucher(voucher)
+        score = score_voucher(voucher)
+    except Exception:
+        return ""
+    if not is_super:
+        return ""
+    if "100K" in kind or voucher.min_order_value == 0:
+        return f"💎 <b>SIÊU PHẨM 0Đ</b> (điểm {score}/100)\n"
+    return f"🔥 <b>MÃ NGON</b> (điểm {score}/100)\n"
+
+
+def format_stack_hint(voucher: Voucher) -> str:
+    cats = ", ".join(voucher.category_names or []).lower()
+    if "live" in cats or "video" in cats:
+        return "🧩 <i>Xếp chồng được: Live/Video + Sàn + Shop. Lưu cả 3 rồi áp cùng lúc.</i>\n"
+    if "thanh toán" in cats or "spaylater" in cats or "thẻ" in cats:
+        return "🧩 <i>Mã thanh toán: xếp chồng với mã sàn. Nhớ chọn đúng phương thức thanh toán.</i>\n"
+    return ""
+
 def format_upcoming_known_code(voucher: Voucher) -> str:
     """Mẫu 1: Mã đã có và sắp mở"""
     scope_str = format_scope_display(voucher)
@@ -28,6 +52,7 @@ def format_upcoming_known_code(voucher: Voucher) -> str:
 
     msg = (
         "🔑 <b>MÃ SHOPEE SẮP MỞ</b>\n\n"
+        f"{format_super_badge(voucher)}"
         f"<b>Phạm vi:</b> {scope_str}\n"
         f"<b>Mã:</b> <code>{voucher.voucher_code}</code>\n"
         f"<b>Giảm:</b> {discount_str}\n"
@@ -36,6 +61,8 @@ def format_upcoming_known_code(voucher: Voucher) -> str:
         f"<b>Trạng thái:</b> Sắp mở\n"
         f"<b>Nguồn:</b> <a href=\"{voucher.source_url}\">Mở nguồn</a>\n"
         f"<b>Độ tin cậy:</b> {conf_str}\n"
+        f"{format_stack_hint(voucher)}"
+        "✋ <i>Nhập tay / bấm Lưu thủ công, bot không tự claim để an toàn acc.</i>\n"
     )
     return msg
 
@@ -62,25 +89,34 @@ def format_active_voucher(voucher: Voucher) -> str:
 
     msg = (
         "🔥 <b>MÃ SHOPEE ĐÃ MỞ — NHẬP MÃ NGAY</b>\n\n"
+        f"{format_super_badge(voucher)}"
         f"<b>Mã:</b> <code>{voucher.voucher_code}</code>\n"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"
         f"<b>Hết hạn:</b> {voucher.end_time}\n"
         f"<b>Phạm vi:</b> {scope_str}\n"
-        f"<b>Nguồn:</b> <a href=\"{voucher.source_url}\">Mở nguồn</a>\n\n"
+        f"<b>Nguồn:</b> <a href=\"{voucher.source_url}\">Mở nguồn</a>\n"
+        f"{format_stack_hint(voucher)}\n"
         "👉 <i>Nhập mã ngay tại bước thanh toán kẻo hết lượt!</i>"
     )
     return msg
 
 def format_countdown_reminder(voucher: Voucher, reminder_type: str) -> str:
-    """Mẫu 4: Nhắc nhở hẹn giờ mở mã (T-15m, T-2m)"""
-    time_badge = "15 PHÚT" if reminder_type == "REMINDER_15M" else "2 PHÚT"
+    """Mẫu 4: Nhắc nhở hẹn giờ mở mã (T-60m, T-15m, T-5m, T-2m)"""
+    badge_map = {
+        "REMINDER_60M": "60 PHÚT",
+        "REMINDER_15M": "15 PHÚT",
+        "REMINDER_5M": "5 PHÚT",
+        "REMINDER_2M": "2 PHÚT",
+    }
+    time_badge = badge_map.get(reminder_type, "SẮP")
     scope_str = format_scope_display(voucher)
     discount_str = format_discount_value(voucher)
     min_spend_str = format_currency(voucher.min_order_value)
 
     msg = (
         f"⏰ <b>NHẮC NHỞ: CÒN {time_badge} NỮA MỞ MÃ!</b>\n\n"
+        f"{format_super_badge(voucher)}"
         f"<b>Mã:</b> <code>{voucher.voucher_code}</code>\n"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"

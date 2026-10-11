@@ -8,6 +8,9 @@ from core.upcoming_voucher_discovery import UpcomingVoucherDiscovery
 from sources.shopee_platform_campaigns import ShopeePlatformCampaignSource
 from sources.shopee_shop_campaigns import ShopeeShopCampaignSource
 from sources.community_voucher_source import CommunityVoucherSource
+from sources.payment_voucher_source import PaymentVoucherSource
+from sources.live_video_voucher_source import LiveVideoVoucherSource
+from sources.leak_inbox_source import LeakInboxSource
 
 class DiscoveryService:
     def __init__(
@@ -21,6 +24,9 @@ class DiscoveryService:
         self.platform_source = ShopeePlatformCampaignSource()
         self.shop_source = ShopeeShopCampaignSource()
         self.community_source = CommunityVoucherSource()
+        self.payment_source = PaymentVoucherSource()
+        self.live_video_source = LiveVideoVoucherSource()
+        self.leak_source = LeakInboxSource()
 
     async def run_scan(
         self,
@@ -67,7 +73,28 @@ class DiscoveryService:
             except Exception as e:
                 errors.append(f"Community source error: {e}")
 
-        # 4. Phân tích & Xử lý qua UpcomingVoucherDiscovery
+        # 4. Quét voucher thanh toán (ShopeePay / SPayLater / thẻ)
+        if scan_mode in (ScanMode.AUTO, ScanMode.MANUAL_ALL, ScanMode.MANUAL_PLATFORM):
+            try:
+                collected_items.extend(await self.payment_source.fetch_vouchers())
+            except Exception as e:
+                errors.append(f"Payment source error: {e}")
+
+        # 5. Quét Live / Video (kho 30%+)
+        if scan_mode in (ScanMode.AUTO, ScanMode.MANUAL_ALL, ScanMode.MANUAL_PLATFORM):
+            try:
+                collected_items.extend(await self.live_video_source.fetch_vouchers())
+            except Exception as e:
+                errors.append(f"LiveVideo source error: {e}")
+
+        # 6. Quét leak inbox thủ công (mã 0đ do user dán)
+        if scan_mode in (ScanMode.AUTO, ScanMode.MANUAL_ALL, ScanMode.MANUAL_PLATFORM):
+            try:
+                collected_items.extend(await self.leak_source.fetch_vouchers())
+            except Exception as e:
+                errors.append(f"Leak source error: {e}")
+
+        # 7. Phân tích & Xử lý qua UpcomingVoucherDiscovery
         proc_res = self.discovery.process_collected_vouchers(
             collected_items,
             min_fixed_discount=min_fixed_discount,

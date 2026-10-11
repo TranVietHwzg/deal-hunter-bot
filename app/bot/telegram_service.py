@@ -259,7 +259,7 @@ class TelegramBotService:
         return True
 
     async def broadcast_reminder(self, voucher: Voucher, reminder_type: str) -> bool:
-        """Gửi thông báo nhắc giờ T-15m hoặc T-2m"""
+        """Gửi thông báo nhắc giờ T-60m / T-15m / T-5m / T-2m"""
         fp = self.dedupe_service.calculate_fingerprint(voucher, reminder_type)
         if self.dedupe_service.is_duplicate(fp):
             return False
@@ -269,7 +269,17 @@ class TelegramBotService:
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
-        ev_enum = NotificationEventType.REMINDER_15M if reminder_type == "REMINDER_15M" else NotificationEventType.REMINDER_2M
+        ev_map = {
+            "REMINDER_60M": NotificationEventType.REMINDER_60M,
+            "REMINDER_15M": NotificationEventType.REMINDER_15M,
+            "REMINDER_5M": NotificationEventType.REMINDER_5M,
+            "REMINDER_2M": NotificationEventType.REMINDER_2M,
+        }
+        # Fallback cho DB cũ chưa có enum mới
+        try:
+            ev_enum = ev_map.get(reminder_type, NotificationEventType.REMINDER_15M)
+        except Exception:
+            ev_enum = NotificationEventType.REMINDER_15M
         self.scan_repo.record_notification(NotificationEvent(
             id=f"NOTIF_{uuid.uuid4().hex[:8]}",
             voucher_id=voucher.id,
@@ -428,6 +438,74 @@ class TelegramBotService:
                 "• Lọc Freeship: <b>KÍCH HOẠT (100% Loại trừ)</b>\n"
             )
             await self.send_message(status_msg, reply_markup=get_main_keyboard())
+            return
+
+        if text == "/top" or text.startswith("/top "):
+            try:
+                from core.voucher_filter import score_voucher, is_super_voucher
+                active = self.voucher_repo.get_active_vouchers()
+                upcoming = self.voucher_repo.get_upcoming_vouchers(days=7)
+                pool = list(active) + [v for v in upcoming if v.voucher_code]
+                ranked = sorted(pool, key=lambda v: score_voucher(v), reverse=True)[:10]
+                if not ranked:
+                    await self.send_message("💎 <i>Chưa có mã ngon nào. Bấm Quét ngay để nạp.</i>", reply_markup=get_back_keyboard())
+                else:
+                    lines = ["💎 <b>TOP MÃ NGON NHẤT (0đ / rẻ lên trước):</b>\n"]
+                    for v in ranked:
+                        sc = score_voucher(v)
+                        sup, _ = is_super_voucher(v)
+                        star = "💎 " if sup else "• "
+                        code = v.voucher_code or "CHƯA LỘ"
+                        lines.append(f"{star}<code>{code}</code> {format_discount_value(v)} đơn {format_currency(v.min_order_value)} [{sc}đ] — {v.end_time}")
+                    lines.append("\n✋ <i>Nhập tay thủ công, bot không tự claim.</i>")
+                    await self.send_message("\n".join(lines), reply_markup=get_back_keyboard())
+            except Exception as e:
+                await self.send_message(f"Lỗi /top: {e}")
+            return
+
+        if text.startswith("/leak"):
+            parts = text.split()
+            if len(parts) < 2:
+                await self.send_message(
+                    "📥 <b>THÊM MÃ LEAK THỦ CÔNG</b>\n"
+                    "Cú pháp: <code>/leak MÃCODE 100k 0</code>\n"
+                    "VD: <code>/leak SIEUHOI100K 100000 0</code>\n"
+                    "Bot chỉ đưa vào radar để nhắc giờ, không tự claim.",
+                    reply_markup=get_back_keyboard())
+                return
+            code = parts[1].upper()
+            d_val = self._parse_price_from_text(parts[2]) if len(parts) > 2 else 50000.0
+            min_o = self._parse_price_from_text(parts[3]) if len(parts) > 3 else 0.0
+            try:
+                import json as _json
+                inbox = os.path.join(os.getcwd(), "data", "leak_inbox.json")
+                if not os.path.exists(os.path.dirname(inbox)):
+                    inbox = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "leak_inbox.json")
+                os.makedirs(os.path.dirname(inbox), exist_ok=True)
+                rows = []
+                if os.path.exists(inbox):
+                    try:
+                        with open(inbox, "r", encoding="utf-8") as f:
+                            rows = _json.load(f) or []
+                    except Exception:
+                        rows = []
+                rows.append({"code": code, "discount": d_val, "min_order": min_o, "title": f"Leak thủ công: {code}"})
+                with open(inbox, "w", encoding="utf-8") as f:
+                    _json.dump(rows, f, ensure_ascii=False, indent=2)
+                await self.send_message(f"✅ Đã nạp <code>{code}</code> ({int(d_val):,}đ đơn {int(min_o):,}đ) vào radar. Bấm /scan để lên sóng.", reply_markup=get_main_keyboard())
+            except Exception as e:
+                await self.send_message(f"Lỗi lưu leak: {e}")
+            return
+
+        if text == "/xepchong":
+            await self.send_message(
+                "🧩 <b>CÁCH XẾP CHỒNG 3 LỚP RA 0đ (1 acc):</b>\n"
+                "1. Mã sàn 100k/50k (từ /top)\n"
+                "2. Mã Live/Video 30% (lưu trong live)\n"
+                "3. Mã thanh toán ShopeePay/SPayLater\n"
+                "Add hàng 1k-10k vào giỏ trước, tới giờ bot nhắc T-2m thì áp cả 3 lớp + xu.\n"
+                "✋ <i>Lưu tay từng mã, không dùng tool claim hộ.</i>",
+                reply_markup=get_back_keyboard())
             return
 
         # 2. Xử lý khi người dùng dán link shop Shopee trực tiếp

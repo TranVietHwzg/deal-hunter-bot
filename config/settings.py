@@ -19,8 +19,8 @@ _local_cfg = _read_local_config()
 class AppSettings(BaseModel):
     # Telegram Credentials
     telegram_bot_token: str = Field(
-        default=os.environ.get("TELEGRAM_BOT_TOKEN") 
-        or _local_cfg.get("telegram", {}).get("bot_token", "8914288470:AAHZz1hKU4yuwOBU5ovK8cOjOyU0E0P69Kw")
+        default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN") 
+        or _local_cfg.get("telegram", {}).get("bot_token", "")
     )
     telegram_chat_id: str = Field(
         default=os.environ.get("TELEGRAM_CHAT_ID") 
