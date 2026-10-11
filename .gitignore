@@ -9,3 +9,5 @@ venv/
 ENV/
 config.json
 deals.db
+.pytest_cache/
+sync_github.py
