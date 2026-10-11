@@ -35,34 +35,22 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
         for shop in tracked:
             self.shop_repo.update_last_scan(shop.shop_id)
 
-            # Mô phỏng nạp voucher công khai hợp lệ của shop
-            shop_slug = shop.shop_name.upper().replace(" ", "")[:8]
-            sample_voucher = {
-                "id": f"SP_SHOP_{shop.shop_id}_{today_date.replace('/', '')}",
-                "voucher_code": f"{shop_slug}50K",
-                "scope_type": "SHOP",
-                "shop_id": shop.shop_id,
-                "shop_name": shop.shop_name,
-                "shop_url": shop.shop_url,
-                "category": f"Gian hàng {shop.shop_name}",
-                "title": f"Voucher Shop {shop.shop_name}: Giảm 50k",
-                "description": f"Áp dụng khi mua hàng tại gian hàng chính hãng {shop.shop_name}",
-                "discount_type": "FIXED",
-                "discount_value": 50000,
-                "max_discount": 50000,
-                "min_order_value": 300000,
-                "start_time": f"00:00 {today_date}",
-                "end_time": f"23:59 {tomorrow_date}",
-                "claim_url": shop.shop_url,
-                "source_url": shop.shop_url,
-                "source_type": "SHOP_PAGE",
-                "confidence_score": 95,
-                "is_freeship": 0
-            }
-
-            ship, _ = is_freeship(sample_voucher)
-            if not ship:
-                results.append(sample_voucher)
+        # Chỉ nạp voucher thật từ file data/shop_vouchers.json nếu có
+        import os
+        import json
+        shop_vouchers_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "shop_vouchers.json")
+        if os.path.exists(shop_vouchers_file):
+            try:
+                with open(shop_vouchers_file, "r", encoding="utf-8") as f:
+                    shop_data = json.load(f)
+                tracked_ids = {str(s.shop_id).lower() for s in tracked}
+                for item in shop_data:
+                    if str(item.get("shop_id", "")).lower() in tracked_ids:
+                        ship, _ = is_freeship(item)
+                        if not ship:
+                            results.append(item)
+            except Exception:
+                pass
 
         self.circuit_breaker.record_success()
         return results

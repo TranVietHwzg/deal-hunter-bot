@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "code": "REALCODE100K",
+    "discount": 100000.0,
+    "discount_type": "FIXED",
+    "max_discount": 100000.0,
+    "min_order": 0.0,
+    "start": "00:00 15/10/2026",
+    "title": "Mã thật nạp thủ công: REALCODE100K"
+  },
+  {
+    "code": "REALCODE100K",
+    "discount": 100000.0,
+    "discount_type": "FIXED",
+    "max_discount": 100000.0,
+    "min_order": 0.0,
+    "start": "00:00 15/10/2026",
+    "title": "Mã thật nạp thủ công: REALCODE100K"
+  },
+  {
+    "code": "REALCODE100K",
+    "discount": 100000.0,
+    "discount_type": "FIXED",
+    "max_discount": 100000.0,
+    "min_order": 0.0,
+    "start": "00:00 15/10/2026",
+    "title": "Mã thật nạp thủ công: REALCODE100K"
+  }
+]

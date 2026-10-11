@@ -27,11 +27,11 @@ class LiveVideoVoucherSource(BaseVoucherSource):
         return [
             {
                 "id": f"LV_LIVE_30PCT_{today.replace('/', '')}",
-                "voucher_code": "LIVE30NGON",
+                "voucher_code": None,
                 "scope_type": "CATEGORY",
                 "category": "Shopee Live",
                 "title": "Live 30% tối đa 150k đơn từ 300k",
-                "description": "Lưu trong live có ghim, áp chồng mã sàn",
+                "description": "Lưu trực tiếp trong live có ghim, áp chồng mã sàn lúc thanh toán",
                 "discount_type": "PERCENT",
                 "discount_value": 30,
                 "max_discount": 150000,
@@ -46,11 +46,11 @@ class LiveVideoVoucherSource(BaseVoucherSource):
             },
             {
                 "id": f"LV_VIDEO_25PCT_{today.replace('/', '')}",
-                "voucher_code": "VIDEO25NGON",
+                "voucher_code": None,
                 "scope_type": "CATEGORY",
                 "category": "Shopee Video",
                 "title": "Video 25% tối đa 200k đơn từ 400k",
-                "description": "Thêm vào giỏ từ video creator rồi áp mã",
+                "description": "Thêm vào giỏ từ video creator rồi áp mã tại bước thanh toán",
                 "discount_type": "PERCENT",
                 "discount_value": 25,
                 "max_discount": 200000,

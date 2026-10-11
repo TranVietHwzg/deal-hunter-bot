@@ -437,6 +437,9 @@ class TelegramBotService:
                 f"• {personal_msg}\n"
             )
             await self.send_message(status_msg, reply_markup=get_elite_main_keyboard())
+        if text.startswith("/leak") or text.startswith("/nhapma"):
+            resp_msg = await self.elite_commands.handle_leak_command(text)
+            await self.send_message(resp_msg, reply_markup=get_elite_main_keyboard())
             return
 
         if text == "/top" or text.startswith("/top "):

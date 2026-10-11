@@ -20,17 +20,21 @@ def format_scope_display(voucher: Voucher) -> str:
 
 def format_elite_upcoming_known(voucher: Voucher, score: int = 90, reason: str = "") -> str:
     """Mẫu 1: Voucher SIÊU XỊN sắp mở"""
-    code_str = voucher.voucher_code or "CHƯA CÔNG BỐ"
     discount_str = format_discount_display(voucher)
     min_spend_str = format_currency(voucher.min_order_value)
     scope_str = format_scope_display(voucher)
     
+    if voucher.voucher_code:
+        code_line = f"<b>Mã nhập tay:</b> <code>{voucher.voucher_code}</code> <i>(Chạm để sao chép)</i>\n"
+    else:
+        code_line = "<b>Hình thức:</b> 🎟️ Lưu trên banner Shopee <i>(Không cần nhập code)</i>\n"
+
     if not reason:
         reason = "Giảm cao, đơn hợp lý, phạm vi rộng, nguồn xác minh."
 
     return (
         "🔥 <b>MÃ SHOPEE SIÊU XỊN — SẮP MỞ</b>\n\n"
-        f"<b>Mã:</b> <code>{code_str}</code>\n"
+        f"{code_line}"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"
         f"<b>Phạm vi:</b> {scope_str}\n"
@@ -42,9 +46,13 @@ def format_elite_upcoming_known(voucher: Voucher, score: int = 90, reason: str =
 def format_elite_shop_voucher(voucher: Voucher, score: int = 90, reason: str = "") -> str:
     """Mẫu 2: Voucher shop SIÊU XỊN"""
     shop_str = voucher.shop_name or "Shop đang theo dõi"
-    code_str = voucher.voucher_code or "CHƯA CÔNG BỐ"
     discount_str = format_discount_display(voucher)
     min_spend_str = format_currency(voucher.min_order_value)
+
+    if voucher.voucher_code:
+        code_line = f"<b>Mã nhập tay:</b> <code>{voucher.voucher_code}</code> <i>(Chạm để sao chép)</i>\n"
+    else:
+        code_line = "<b>Hình thức:</b> 🎟️ Lưu tại trang gian hàng <i>(Không cần nhập code)</i>\n"
 
     if not reason:
         reason = f"Tiết kiệm thực tế cao, shop đang theo dõi."
@@ -52,7 +60,7 @@ def format_elite_shop_voucher(voucher: Voucher, score: int = 90, reason: str = "
     return (
         "🔥 <b>MÃ SHOP SIÊU XỊN</b>\n\n"
         f"<b>Shop:</b> {shop_str}\n"
-        f"<b>Mã:</b> <code>{code_str}</code>\n"
+        f"{code_line}"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"
         f"<b>Hiệu lực:</b> {voucher.start_time} ➔ {voucher.end_time}\n"

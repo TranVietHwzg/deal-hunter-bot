@@ -82,14 +82,14 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
         next_week = (now + timedelta(days=7)).strftime("%d/%m/%Y")
 
         return [
-            # 1. Mã Ẩn Toàn Sàn Đã Biết - Đang Active
+            # 1. Mã Banner Siêu Hội Shopee (Lưu trên banner)
             {
                 "id": "SP_AN_SIEUHOI_110K",
-                "voucher_code": "SIEUHOISHOPEEOCTR",
+                "voucher_code": None,
                 "scope_type": "PLATFORM",
                 "category": "Siêu Hội Shopee",
-                "title": "Mã Ẩn Siêu Hội: Giảm 110.000đ đơn từ 0đ",
-                "description": "Mã ẩn nhập tay công khai chiến dịch Siêu Hội Shopee",
+                "title": "Mã Chiến Dịch Siêu Hội: Giảm 110.000đ đơn từ 0đ",
+                "description": "Lưu trực tiếp trên banner chiến dịch Siêu Hội Shopee (Không cần nhập code)",
                 "discount_type": "FIXED",
                 "discount_value": 110000,
                 "max_discount": 110000,
@@ -105,11 +105,11 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             # 2. Khung Giờ Vàng 00H Hôm Nay
             {
                 "id": f"SP_GOLDEN_00H_{today_date.replace('/', '')}",
-                "voucher_code": "GOLDEN00HOCT",
+                "voucher_code": None,
                 "scope_type": "PLATFORM",
                 "category": "Khung Giờ Vàng 00H",
                 "title": "Khung Giờ Vàng 0H: Giảm 20% tối đa 200k đơn từ 500k",
-                "description": "Mã toàn sàn khung 0H đêm nay",
+                "description": "Lưu trên trang Khung Giờ Vàng Shopee trước 0h (Không cần nhập code)",
                 "discount_type": "PERCENT",
                 "discount_value": 20,
                 "max_discount": 200000,
@@ -125,11 +125,11 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             # 3. Khung Giờ Vàng 12H Trưa Hôm Nay
             {
                 "id": f"SP_GOLDEN_12H_{today_date.replace('/', '')}",
-                "voucher_code": "GOLDEN12HOCT",
+                "voucher_code": None,
                 "scope_type": "PLATFORM",
                 "category": "Khung Giờ Vàng 12H",
                 "title": "Khung Giờ Vàng 12H: Giảm 100k đơn từ 400k",
-                "description": "Mã toàn sàn mở lúc 12:00 trưa",
+                "description": "Lưu trên trang Khung Giờ Vàng lúc 12:00 trưa (Không cần nhập code)",
                 "discount_type": "FIXED",
                 "discount_value": 100000,
                 "max_discount": 100000,
@@ -145,11 +145,11 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             # 4. Khung Giờ Vàng 20H Tối Nay (Sắp Mở)
             {
                 "id": f"SP_GOLDEN_20H_{today_date.replace('/', '')}",
-                "voucher_code": "GOLDEN20HOCT",
+                "voucher_code": None,
                 "scope_type": "PLATFORM",
                 "category": "Khung Giờ Vàng 20H",
                 "title": "Khung Giờ Vàng 20H: Giảm 15% tối đa 150k đơn từ 400k",
-                "description": "Mã toàn sàn mở lúc 20:00 tối nay",
+                "description": "Lưu trên trang Khung Giờ Vàng lúc 20:00 tối (Không cần nhập code)",
                 "discount_type": "PERCENT",
                 "discount_value": 15,
                 "max_discount": 150000,
@@ -165,11 +165,11 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             # 5. Mã Điện Tử Sắp Mở Ngày Mai (Khung 00:00)
             {
                 "id": f"SP_TECH_500K_{tomorrow_date.replace('/', '')}",
-                "voucher_code": "TECHTOMORROW500",
+                "voucher_code": None,
                 "scope_type": "CATEGORY",
                 "category": "Điện Tử Công Nghệ",
                 "title": "Mã Công Nghệ Ngày Mai: Giảm 500k đơn từ 2.500.000đ",
-                "description": "Mã ngành hàng công nghệ mở lúc 00:00 ngày mai",
+                "description": "Lưu trên trang Siêu Sale Công Nghệ mở lúc 00:00 ngày mai",
                 "discount_type": "FIXED",
                 "discount_value": 500000,
                 "max_discount": 500000,
@@ -185,7 +185,7 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             # 6. Sự Kiện Sale Giữa Tháng Chưa Lộ Mã (UPCOMING_UNKNOWN_CODE)
             {
                 "id": "SP_EVENT_MIDMONTH_SALE",
-                "voucher_code": None,  # Không tạo code giả
+                "voucher_code": None,
                 "scope_type": "PLATFORM",
                 "category": "Sale Giữa Tháng",
                 "title": "Đại Tiệc Sale Giữa Tháng Shopee",
@@ -205,11 +205,11 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             # 7. Mã Shopee Video Giảm 18% Sắp Mở Ngày Mai
             {
                 "id": f"SP_VIDEO_18PCT_{tomorrow_date.replace('/', '')}",
-                "voucher_code": "VIDEOTOMORROW18",
+                "voucher_code": None,
                 "scope_type": "CATEGORY",
                 "category": "Shopee Video",
                 "title": "Shopee Video: Giảm 18% tối đa 200k",
-                "description": "Áp dụng đơn từ 500k khi mua qua video",
+                "description": "Áp dụng đơn từ 500k khi mua qua video creator",
                 "discount_type": "PERCENT",
                 "discount_value": 18,
                 "max_discount": 200000,
@@ -225,7 +225,7 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             # 8. Mã Shopee Live 15% Tối Mai
             {
                 "id": f"SP_LIVE_15PCT_{tomorrow_date.replace('/', '')}",
-                "voucher_code": "LIVETOMORROW15",
+                "voucher_code": None,
                 "scope_type": "CATEGORY",
                 "category": "Shopee Live",
                 "title": "Shopee Live: Giảm 15% tối đa 120k",

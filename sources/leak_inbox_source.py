@@ -29,51 +29,6 @@ class LeakInboxSource(BaseVoucherSource):
         )
         self.inbox_path = inbox_path
 
-    def _curated_zero_dong(self) -> List[Dict[str, Any]]:
-        now = datetime.now(VN_TZ)
-        today = now.strftime("%d/%m/%Y")
-        tomorrow = (now + timedelta(days=1)).strftime("%d/%m/%Y")
-        return [
-            {
-                "id": f"LEAK_ZERO_100K_{today.replace('/', '')}",
-                "voucher_code": "SIEUHOI100K0D",
-                "scope_type": "PLATFORM",
-                "category": "Leak 0đ",
-                "title": "Leak: Giảm 100k đơn từ 0đ",
-                "description": "Mã leak cộng đồng, nhập tay trong Voucher > Nhập mã",
-                "discount_type": "FIXED",
-                "discount_value": 100000,
-                "max_discount": 100000,
-                "min_order_value": 0,
-                "start_time": f"00:00 {today}",
-                "end_time": f"23:59 {today}",
-                "claim_url": "https://shopee.vn/m/ma-giam-gia",
-                "source_url": "https://shopee.vn/m/ma-giam-gia",
-                "source_type": "LEAK_INBOX",
-                "confidence_score": 88,
-                "is_freeship": 0,
-            },
-            {
-                "id": f"LEAK_ZERO_50K_{today.replace('/', '')}",
-                "voucher_code": "LEAK50K0D",
-                "scope_type": "PLATFORM",
-                "category": "Leak 0đ",
-                "title": "Leak: Giảm 50k đơn từ 0đ",
-                "description": "Mã leak cộng đồng, hết lượt rất nhanh",
-                "discount_type": "FIXED",
-                "discount_value": 50000,
-                "max_discount": 50000,
-                "min_order_value": 0,
-                "start_time": f"00:00 {today}",
-                "end_time": f"23:59 {tomorrow}",
-                "claim_url": "https://shopee.vn/m/ma-giam-gia",
-                "source_url": "https://shopee.vn/m/ma-giam-gia",
-                "source_type": "LEAK_INBOX",
-                "confidence_score": 87,
-                "is_freeship": 0,
-            },
-        ]
-
     def _load_inbox(self) -> List[Dict[str, Any]]:
         if not os.path.exists(self.inbox_path):
             return []
@@ -117,7 +72,7 @@ class LeakInboxSource(BaseVoucherSource):
         if not self.circuit_breaker.can_execute():
             return []
         await self.rate_limiter.acquire()
-        combined = self._curated_zero_dong() + self._load_inbox()
+        combined = self._load_inbox()
         clean = [v for v in combined if not is_freeship(v)[0]]
         self.circuit_breaker.record_success()
         return clean

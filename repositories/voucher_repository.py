@@ -346,3 +346,7 @@ class VoucherRepository(BaseRepository):
             ORDER BY discount_value DESC
             """).fetchall()
             return [self._row_to_voucher(dict(r)) for r in rows]
+
+    def get_all_vouchers(self, limit: int = 100) -> List[Voucher]:
+        """Lấy tất cả vouchers không phải freeship"""
+        return self.get_vouchers(limit=limit)

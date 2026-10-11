@@ -62,25 +62,47 @@ class PublicBannerSource(BaseVoucherSource):
                         code = m.strip().upper()
                         if len(code) < 4 or len(code) > 25:
                             continue
-                        # bỏ từ chung chung
-                        if code in ("SALE", "VOUCHER", "SHOPEE", "MALL", "CODE"):
+                        # Bỏ từ chung chung
+                        if code in ("SALE", "VOUCHER", "SHOPEE", "MALL", "CODE", "PROMO", "DISCOUNT", "VOUCHERS"):
                             continue
+                        
+                        # Tìm số tiền hoặc % giảm trong vùng lân cận (100 ký tự xung quanh code)
+                        pos = text.upper().find(code)
+                        context = text[max(0, pos - 100):min(len(text), pos + 100)].lower() if pos != -1 else ""
+                        
+                        # Tìm giảm tiền: vd 50k, 100k, 50.000đ
+                        val_match = re.search(r'giảm\s*(\d{1,3})(?:k|\.000|000)', context)
+                        pct_match = re.search(r'giảm\s*(\d{1,2})\s*%', context)
+                        min_match = re.search(r'đơn\s*(?:từ)?\s*(\d{1,3})(?:k|\.000|000)', context)
+                        
+                        if val_match:
+                            d_val = float(val_match.group(1)) * 1000
+                            d_type = "FIXED"
+                        elif pct_match:
+                            d_val = float(pct_match.group(1))
+                            d_type = "PERCENT"
+                        else:
+                            # Không xác định được giá trị giảm thật -> Bỏ qua, tuyệt đối không bịa số tiền
+                            continue
+
+                        min_val = float(min_match.group(1)) * 1000 if min_match else 0
+                        
                         item = {
                             "id": f"PB_{code}_{today.replace('/','')}",
                             "voucher_code": code,
                             "scope_type": "PLATFORM",
-                            "title": f"Ma cong khai tu banner: {code}",
-                            "description": f"Phat hien cong khai tai {url}, can nhap tay thu o buoc thanh toan. Khong tu claim.",
-                            "discount_type": "FIXED",
-                            "discount_value": 50000,
-                            "max_discount": 50000,
-                            "min_order_value": 0,
+                            "title": f"Mã công khai từ banner: {code}",
+                            "description": f"Phát hiện công khai tại {url}, nhập tay ở bước thanh toán.",
+                            "discount_type": d_type,
+                            "discount_value": d_val,
+                            "max_discount": d_val if d_type == "FIXED" else d_val * 1000,
+                            "min_order_value": min_val,
                             "start_time": f"00:00 {today}",
                             "end_time": f"23:59 {today}",
                             "claim_url": url,
                             "source_url": url,
                             "source_type": "PUBLIC_BANNER",
-                            "confidence_score": 75,
+                            "confidence_score": 85,
                             "is_freeship": 0,
                         }
                         if not is_freeship(item)[0]:
