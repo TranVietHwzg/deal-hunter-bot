@@ -16,8 +16,8 @@ from sources.personal_eligible_voucher_source import PersonalEligibleVoucherSour
 from sources.community_voucher_source import CommunityVoucherSource
 from sources.payment_voucher_source import PaymentVoucherSource
 from sources.live_video_voucher_source import LiveVideoVoucherSource
-from sources.leak_inbox_source import LeakInboxSource
 from sources.public_banner_source import PublicBannerSource
+from sources.leak_inbox_source import LeakInboxSource
 
 class EliteDiscoveryService:
     """Dịch vụ quét và phát hiện Elite Shopee Voucher:
@@ -41,8 +41,8 @@ class EliteDiscoveryService:
         self.community_source = CommunityVoucherSource()
         self.payment_source = PaymentVoucherSource()
         self.live_video_source = LiveVideoVoucherSource()
-        self.leak_source = LeakInboxSource()
         self.banner_source = PublicBannerSource()
+        self.leak_source = LeakInboxSource()
 
     async def run_elite_scan(
         self,

@@ -175,126 +175,14 @@ class EliteCommands:
             "────────────────────\n"
             "🚫 <i>Bộ lọc Freeship luôn được BẬT ở mức 100% (không thể tắt).</i>"
         )
+        return msg, get_elite_back_keyboard()
+
     async def handle_leak_command(self, text: str) -> str:
-        """Xử lý lệnh nạp mã thật từ người dùng /leak <CODE> <GIẢM> <ĐƠN_TỐI_THIỂU> [GIỜ_MỞ]"""
-        import re, json, os, uuid
-        from datetime import datetime, timezone, timedelta
-        from core.elite_voucher_filter import is_elite_voucher
-        from models.voucher import Voucher, ScopeType, DiscountType, VoucherStatus
-
-        parts = text.strip().split()
-        if len(parts) < 3:
-            return (
-                "ℹ️ <b>CÚ PHÁP NẠP MÃ THẬT (/leak):</b>\n\n"
-                "<code>/leak &lt;MÃ&gt; &lt;GIẢM&gt; &lt;ĐƠN_TỐI_THIỂU&gt; [GIỜ_MỞ]</code>\n\n"
-                "<b>Ví dụ mã giảm tiền:</b>\n"
-                "• <code>/leak ELITE100K 100000 0</code> (Giảm 100k đơn 0đ)\n"
-                "• <code>/leak ANKER50K 50000 150000 00:00 12/10/2026</code>\n\n"
-                "<b>Ví dụ mã giảm %:</b>\n"
-                "• <code>/leak SALE30PCT 30% 100000 50000</code> (30%, đơn 100k, trần 50k)\n"
-            )
-
-        code = parts[1].strip().upper()
-        raw_discount = parts[2].strip()
-        raw_min_order = parts[3].strip() if len(parts) > 3 else "0"
-
-        is_percent = "%" in raw_discount
-        clean_d = re.sub(r'[^\d.]', '', raw_discount)
-        clean_min = re.sub(r'[^\d.]', '', raw_min_order)
-        try:
-            discount_val = float(clean_d)
-            min_order_val = float(clean_min) if clean_min else 0.0
-        except ValueError:
-            return "❌ <b>Lỗi:</b> Số tiền hoặc % giảm không hợp lệ."
-
-        now = datetime.now(timezone(timedelta(hours=7)))
-        if len(parts) >= 5 and ":" in parts[4]:
-            start_time_str = " ".join(parts[4:])
-        else:
-            start_time_str = now.strftime("%H:%M %d/%m/%Y")
-
-        max_disc = discount_val
-        disc_type = DiscountType.PERCENT if is_percent else DiscountType.FIXED
-        if is_percent:
-            if len(parts) >= 5 and parts[4].replace(".", "").isdigit():
-                max_disc = float(parts[4])
-            else:
-                max_disc = 100000.0  # Mặc định trần hợp lệ nếu không nhập
-
-        v_dict = {
-            "voucher_code": code,
-            "title": f"Mã thật nạp thủ công: {code}",
-            "discount_type": "PERCENT" if is_percent else "FIXED",
-            "discount_value": discount_val,
-            "max_discount": max_disc,
-            "min_order_value": min_order_val,
-            "start_time": start_time_str,
-            "end_time": (now + timedelta(days=2)).strftime("23:59 %d/%m/%Y"),
-            "scope_type": "PLATFORM",
-            "is_freeship": 0,
-            "source_type": "LEAK_INBOX"
-        }
-
-        is_elite, reason = is_elite_voucher(v_dict)
-        if not is_elite:
-            return (
-                f"⚠️ <b>MÃ <code>{code}</code> KHÔNG ĐẠT CHUẨN ELITE:</b>\n\n"
-                f"• Lý do: {reason}\n"
-                f"• Chuẩn Elite: Giảm tiền >=30k đơn 0đ hoặc >=50k (đơn/giảm <= 3); Giảm % >=30% trần >=50k.\n"
-                "<i>Hệ thống không lưu mã này để bảo vệ tiêu chuẩn chất lượng.</i>"
-            )
-
-        v_obj = Voucher(
-            id=f"LEAK_USER_{code}_{uuid.uuid4().hex[:4]}",
-            platform="SHOPEE",
-            voucher_code=code,
-            title=f"Mã nhập tay xác thực: {code}",
-            scope_type=ScopeType.PLATFORM,
-            discount_type=disc_type,
-            discount_value=discount_val,
-            max_discount=max_disc,
-            min_order_value=min_order_val,
-            start_time=start_time_str,
-            end_time=(now + timedelta(days=2)).strftime("23:59 %d/%m/%Y"),
-            status=VoucherStatus.ACTIVE,
-            source_url="https://shopee.vn",
-            source_type="LEAK_INBOX"
-        )
-
-        score, label, _ = calculate_elite_score(v_obj)
-        self.voucher_repo.upsert(v_obj)
-
-        # Lưu vào data/leak_inbox.json
-        inbox_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data")
-        os.makedirs(inbox_dir, exist_ok=True)
-        inbox_path = os.path.join(inbox_dir, "leak_inbox.json")
-        try:
-            existing = []
-            if os.path.exists(inbox_path):
-                with open(inbox_path, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
-                if not isinstance(existing, list):
-                    existing = [existing]
-            existing.append({
-                "code": code,
-                "discount": discount_val,
-                "discount_type": "PERCENT" if is_percent else "FIXED",
-                "max_discount": max_disc,
-                "min_order": min_order_val,
-                "start": start_time_str,
-                "title": f"Mã thật nạp thủ công: {code}"
-            })
-            with open(inbox_path, "w", encoding="utf-8") as f:
-                json.dump(existing, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
+        """Thông báo tính năng /leak đã được loại bỏ để bot tự động săn mã 100%"""
         return (
-            "✅ <b>ĐÃ NẠP MÃ THẬT VÀO RADAR THÀNH CÔNG!</b>\n\n"
-            f"• <b>Mã:</b> <code>{code}</code> <i>(Chạm để sao chép)</i>\n"
-            f"• <b>Mức giảm:</b> {'Giảm ' + str(int(discount_val)) + '%' if is_percent else format_currency(discount_val)}\n"
-            f"• <b>Đơn tối thiểu:</b> {format_currency(min_order_val)}\n"
-            f"• <b>Giờ mở:</b> {start_time_str}\n"
-            f"• <b>Điểm Elite:</b> {score}/100 — <b>{label}</b>\n\n"
-            "🔔 <i>Bot đã kích hoạt radar theo dõi và sẽ gửi thông báo nhắc bạn trước giờ mở!</i>"
+            "🤖 <b>TÍNH NĂNG /leak ĐÃ ĐƯỢC LOẠI BỎ</b>\n\n"
+            "Bạn không cần phải tự đi tìm hay nạp mã thủ công nữa!\n"
+            "Hệ thống <b>Elite Shopee Radar</b> hiện tự động cào và giải mã các mã thật "
+            "từ hệ sinh thái Shopee, lọc sạch 100% mã rác và freeship.\n\n"
+            "👉 Hãy bấm <b>🔍 Quét ngay</b> hoặc <b>🔥 Mã siêu xịn</b> trên menu để nhận mã tự động!"
         )

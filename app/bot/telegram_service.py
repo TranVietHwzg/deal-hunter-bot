@@ -465,40 +465,6 @@ class TelegramBotService:
                 await self.send_message(f"Lỗi /top: {e}")
             return
 
-        if text.startswith("/leak"):
-            parts = text.split()
-            if len(parts) < 2:
-                await self.send_message(
-                    "📥 <b>THÊM MÃ LEAK THỦ CÔNG</b>\n"
-                    "Cú pháp: <code>/leak MÃCODE 100k 0</code>\n"
-                    "VD: <code>/leak SIEUHOI100K 100000 0</code>\n"
-                    "Bot chỉ đưa vào radar để nhắc giờ, không tự claim.",
-                    reply_markup=get_back_keyboard())
-                return
-            code = parts[1].upper()
-            d_val = self._parse_price_from_text(parts[2]) if len(parts) > 2 else 50000.0
-            min_o = self._parse_price_from_text(parts[3]) if len(parts) > 3 else 0.0
-            try:
-                import json as _json
-                inbox = os.path.join(os.getcwd(), "data", "leak_inbox.json")
-                if not os.path.exists(os.path.dirname(inbox)):
-                    inbox = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "leak_inbox.json")
-                os.makedirs(os.path.dirname(inbox), exist_ok=True)
-                rows = []
-                if os.path.exists(inbox):
-                    try:
-                        with open(inbox, "r", encoding="utf-8") as f:
-                            rows = _json.load(f) or []
-                    except Exception:
-                        rows = []
-                rows.append({"code": code, "discount": d_val, "min_order": min_o, "title": f"Leak thủ công: {code}"})
-                with open(inbox, "w", encoding="utf-8") as f:
-                    _json.dump(rows, f, ensure_ascii=False, indent=2)
-                await self.send_message(f"✅ Đã nạp <code>{code}</code> ({int(d_val):,}đ đơn {int(min_o):,}đ) vào radar. Bấm /scan để lên sóng.", reply_markup=get_main_keyboard())
-            except Exception as e:
-                await self.send_message(f"Lỗi lưu leak: {e}")
-            return
-
         if text == "/xepchong":
             await self.send_message(
                 "🧩 <b>CÁCH XẾP CHỒNG 3 LỚP RA 0đ (1 acc):</b>\n"

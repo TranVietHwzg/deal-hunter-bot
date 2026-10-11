@@ -79,36 +79,26 @@ async def test_public_banner_source_rejects_arbitrary_text_without_discount():
         assert code not in FAKE_CODE_SAMPLES
 
 @pytest.mark.anyio
-async def test_leak_command_accepts_elite_promo_code():
+async def test_leak_command_is_decommissioned():
     v_repo = VoucherRepository()
     s_repo = ShopRepository()
     discovery = EliteDiscoveryService(v_repo, None, s_repo)
     commands = EliteCommands(v_repo, s_repo, discovery)
 
-    cmd_text = "/leak REALCODE100K 100000 0 00:00 15/10/2026"
+    cmd_text = "/leak REALCODE100K 100000 0"
     resp = await commands.handle_leak_command(cmd_text)
-    assert "ĐÃ NẠP MÃ THẬT VÀO RADAR THÀNH CÔNG" in resp
-    assert "REALCODE100K" in resp
-    assert "100.000đ" in resp
-
-    # Kiểm tra đã lưu vào DB
-    v = v_repo.get_by_id("LEAK_USER_REALCODE100K_")
-    # v_id có hậu tố uuid
-    all_v = v_repo.get_all_vouchers()
-    saved = [x for x in all_v if x.voucher_code == "REALCODE100K"]
-    assert len(saved) >= 1
-    assert saved[0].discount_value == 100000
-    assert saved[0].min_order_value == 0
+    assert "ĐÃ ĐƯỢC LOẠI BỎ" in resp
+    assert "không cần phải tự đi tìm hay nạp mã thủ công" in resp
 
 @pytest.mark.anyio
-async def test_leak_command_rejects_non_elite_code():
-    v_repo = VoucherRepository()
-    s_repo = ShopRepository()
-    discovery = EliteDiscoveryService(v_repo, None, s_repo)
-    commands = EliteCommands(v_repo, s_repo, discovery)
-
-    # Giảm 10k đơn 0đ -> vi phạm điều kiện giảm >= 30k
-    cmd_text = "/leak TRASH10K 10000 0"
-    resp = await commands.handle_leak_command(cmd_text)
-    assert "KHÔNG ĐẠT CHUẨN ELITE" in resp
-    assert "TRASH10K" in resp
+async def test_community_source_fetches_real_codes():
+    source = CommunityVoucherSource()
+    vouchers = await source.fetch_vouchers()
+    assert isinstance(vouchers, list)
+    for v in vouchers:
+        code = v.get("voucher_code")
+        assert code not in FAKE_CODE_SAMPLES
+        # Đảm bảo mã không rỗng nếu có
+        if code:
+            assert len(code) >= 4
+            assert code.isalnum() or "-" in code or "_" in code
