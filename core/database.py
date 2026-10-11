@@ -143,17 +143,34 @@ def init_db():
     v_cols = [c[1] for c in cursor.execute("PRAGMA table_info(vouchers)").fetchall()]
     migration_cols = {
         "platform": "TEXT DEFAULT 'SHOPEE'",
+        "platform_id": "TEXT DEFAULT 'SHOPEE'",
+        "voucher_id_on_platform": "TEXT",
+        "voucher_type": "TEXT DEFAULT 'PLATFORM'",
+        "category": "TEXT",
         "scope_type": "TEXT DEFAULT 'PLATFORM'",
         "shop_url": "TEXT",
         "category_names": "TEXT",
         "max_discount": "REAL",
+        "max_discount_amount": "REAL",
+        "min_spend": "REAL DEFAULT 0",
         "min_order_value": "REAL DEFAULT 0",
+        "claim_url": "TEXT DEFAULT 'https://shopee.vn'",
         "timezone": "TEXT DEFAULT 'Asia/Ho_Chi_Minh'",
         "source_url": "TEXT DEFAULT 'https://shopee.vn'",
         "source_type": "TEXT DEFAULT 'CAMPAIGN_PAGE'",
         "confidence_score": "INTEGER DEFAULT 90",
         "first_seen_at": "TEXT",
-        "last_seen_at": "TEXT"
+        "last_seen_at": "TEXT",
+        "is_hidden": "INTEGER DEFAULT 0",
+        "quality_score": "INTEGER DEFAULT 0",
+        "is_hot": "INTEGER DEFAULT 0",
+        "verification_status": "TEXT DEFAULT 'UNVERIFIED'",
+        "source_title": "TEXT",
+        "source_captured_at": "TEXT",
+        "source_evidence_excerpt": "TEXT",
+        "verified_at": "TEXT",
+        "last_checked_at": "TEXT",
+        "percentage_used": "REAL"
     }
     for col_name, col_type in migration_cols.items():
         if col_name not in v_cols:
@@ -358,15 +375,28 @@ def init_db():
     """)
 
     # Dọn sạch triệt để mọi voucher Freeship còn sót từ bản cũ
-    cursor.execute("""
-    DELETE FROM vouchers 
-    WHERE LOWER(voucher_type) LIKE '%ship%' 
-       OR LOWER(title) LIKE '%freeship%' 
-       OR LOWER(title) LIKE '%vận chuyển%'
-       OR LOWER(title) LIKE '%phí ship%'
-       OR LOWER(category) LIKE '%freeship%'
-       OR is_freeship != 0;
-    """)
+    try:
+        cur_cols = set([c[1] for c in cursor.execute("PRAGMA table_info(vouchers)").fetchall()])
+        where_clauses = []
+        if "voucher_type" in cur_cols:
+            where_clauses.append("LOWER(voucher_type) LIKE '%ship%'")
+        if "scope_type" in cur_cols:
+            where_clauses.append("LOWER(scope_type) LIKE '%ship%'")
+        if "title" in cur_cols:
+            where_clauses.append("LOWER(title) LIKE '%freeship%'")
+            where_clauses.append("LOWER(title) LIKE '%vận chuyển%'")
+            where_clauses.append("LOWER(title) LIKE '%phí ship%'")
+        if "category" in cur_cols:
+            where_clauses.append("LOWER(category) LIKE '%freeship%'")
+        if "category_names" in cur_cols:
+            where_clauses.append("LOWER(category_names) LIKE '%freeship%'")
+        if "is_freeship" in cur_cols:
+            where_clauses.append("is_freeship != 0")
+
+        if where_clauses:
+            cursor.execute(f"DELETE FROM vouchers WHERE {' OR '.join(where_clauses)};")
+    except Exception as e:
+        print(f"[Database] Lưu ý khi dọn dẹp freeship: {e}")
 
     conn.commit()
     conn.close()
