@@ -63,6 +63,12 @@ class Voucher:
     last_seen_at: Optional[str] = None
     verified_at: Optional[str] = None
     last_checked_at: Optional[str] = None
+    platform_voucher_id: Optional[str] = None
+    claim_type: str = "CODE"
+    verification_level: str = "OBSERVED_PUBLIC"
+    eligibility_status: str = "PERSONAL_UNKNOWN"
+    quality_tags: List[str] = field(default_factory=list)
+    evidence_score: int = 50
     percentage_used: Optional[float] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -71,7 +77,13 @@ class Voucher:
         return {
             "id": self.id,
             "platform": self.platform,
+            "platform_voucher_id": self.platform_voucher_id,
             "voucher_code": self.voucher_code,
+            "claim_type": self.claim_type,
+            "verification_level": self.verification_level,
+            "eligibility_status": self.eligibility_status,
+            "quality_tags": self.quality_tags,
+            "evidence_score": self.evidence_score,
             "verification_status": self.verification_status.value if isinstance(self.verification_status, VerificationStatus) else str(self.verification_status),
             "title": self.title,
             "description": self.description,

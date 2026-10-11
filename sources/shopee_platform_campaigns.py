@@ -238,23 +238,19 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
         ]
 
     async def fetch_vouchers(self) -> List[Dict[str, Any]]:
-        """Thu thập danh sách voucher chiến dịch Shopee kết hợp quét trang công khai và catalog động"""
+        """Thu thập danh sách voucher chiến dịch Shopee từ các trang công khai (Evidence-backed, zero fake)"""
         if not self.circuit_breaker.can_execute():
             return []
 
         await self.rate_limiter.acquire()
 
         combined_items = []
-        # 1. Quét động các trang chiến dịch công khai
+        # 1. Quét các trang chiến dịch công khai có bằng chứng
         for url in self.public_campaign_urls:
             page_vouchers = await self._fetch_public_page_vouchers(url)
             combined_items.extend(page_vouchers)
 
-        # 2. Bổ sung các chiến dịch khung giờ vàng & mã ẩn chuẩn
-        catalog_vouchers = self._get_dynamic_campaign_catalog()
-        combined_items.extend(catalog_vouchers)
-
-        # 3. Lọc sạch qua Zero Freeship
+        # 2. Lọc sạch qua Zero Freeship
         clean_vouchers = []
         seen_ids = set()
         for v in combined_items:

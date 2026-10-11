@@ -6,8 +6,8 @@ from contextlib import contextmanager
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals.db")
 
 class BaseRepository:
-    def __init__(self, db_path: str = DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or os.environ.get("TEST_DB_PATH") or DB_PATH
 
     def get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)

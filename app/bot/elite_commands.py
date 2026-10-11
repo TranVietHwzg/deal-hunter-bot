@@ -240,13 +240,15 @@ class EliteCommands:
         )
 
     async def handle_coverage_command(self) -> str:
-        """Xử lý lệnh: /coverage (Xem độ bao phủ dữ liệu chống sót)"""
+        """Xử lý lệnh: /coverage (Xem độ bao phủ dữ liệu và sức khỏe từng nguồn)"""
         import os
         cookie_enabled = bool(os.environ.get("SHOPEE_COOKIE"))
         tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
+        health_summary = self.voucher_repo.get_source_health_summary() if hasattr(self.voucher_repo, "get_source_health_summary") else {}
         stats = {
             "cookie_enabled": cookie_enabled,
-            "tracked_count": len(tracked)
+            "tracked_count": len(tracked),
+            "sources": health_summary
         }
         return format_coverage_report(stats, tracked_count=len(tracked))
 

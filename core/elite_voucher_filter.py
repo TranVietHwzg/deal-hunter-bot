@@ -192,3 +192,40 @@ def is_elite_voucher(
         return True, f"Đạt Elite: Giảm {dval:.0f}% tối đa {int(max_d):,}đ (tiết kiệm min_order {int(est_saving):,}đ)"
 
     return False, f"Loại: Kiểu giảm giá không hợp lệ: {dtype}"
+
+
+def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
+    """
+    Phân loại nhãn chất lượng độc lập theo thiết kế kiến trúc chuẩn:
+    - Loại trừ: Freeship, hết hạn, hủy, không hợp lệ
+    - HIGH_RATE: Giảm > 30% (kể cả trần nhỏ, nhằm bắt trọn deal tỷ lệ cao)
+    - ELITE_VALUE: Giảm >= 30.000đ đơn 0đ HOẶC giảm > 30% với mức tiết kiệm dự kiến >= 30.000đ
+    """
+    ship, reason = is_freeship(data)
+    if ship:
+        return {"is_qualified": False, "tags": [], "reason": f"Loại freeship: {reason}"}
+
+    dtype, dval, max_d, min_o = extract_voucher_fields(data)
+    tags = []
+
+    if dtype in ("PERCENT", "PERCENTAGE"):
+        if dval > 30.0:
+            tags.append("HIGH_RATE")
+            # Đạt ELITE_VALUE nếu có trần >= 30.000đ hoặc tiết kiệm thực tế >= 30.000đ
+            effective_saving = max_d if (max_d is not None) else (min_o * (dval / 100.0) if min_o > 0 else 0)
+            if (max_d is not None and max_d >= 30000.0) or effective_saving >= 30000.0:
+                tags.append("ELITE_VALUE")
+
+    elif dtype in ("FIXED", "FIXED_AMOUNT"):
+        if dval >= 30000.0 and min_o == 0:
+            tags.append("ELITE_VALUE")
+        elif dval >= 50000.0 and (min_o / dval <= 3.0):
+            tags.append("ELITE_VALUE")
+
+    is_qualified = len(tags) > 0
+    return {
+        "is_qualified": is_qualified,
+        "tags": tags,
+        "reason": f"Đạt nhãn {', '.join(tags)}" if tags else "Không đạt tiêu chí 30k/0đ hoặc >30%"
+    }
+

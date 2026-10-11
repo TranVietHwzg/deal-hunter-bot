@@ -57,8 +57,8 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
                     )
                     for v in raw_list:
                         code = v.get("voucher_code") or v.get("code")
-                        if not code:
-                            continue
+                        raw_v_id = v.get("voucher_id") or v.get("promotionid")
+                        claim_type = "CODE" if code else "SAVE_BUTTON"
                         d_val = float(v.get("discount_value") or v.get("amount") or v.get("coin_percentage") or 0)
                         max_d = float(v.get("max_discount") or v.get("discount_cap") or d_val)
                         min_sp = float(v.get("min_spend") or v.get("min_order_value") or 0)
@@ -75,9 +75,12 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
                             v_status = VerificationStatus.VERIFIED_UPCOMING.value
 
                         shop_url = f"https://shopee.vn/{shop.shop_name or shop.shop_id}"
+                        unique_suffix = code or raw_v_id or f"{int(d_val)}_{int(min_sp)}"
                         v_dict = {
-                            "id": f"SHOP_{shop.shop_id}_{code}",
+                            "id": f"SHOP_{shop.shop_id}_{unique_suffix}",
+                            "platform_voucher_id": str(raw_v_id) if raw_v_id else None,
                             "voucher_code": code,
+                            "claim_type": claim_type,
                             "verification_status": v_status,
                             "title": f"Mã shop {shop.shop_name or shop.shop_id}: Giảm {int(d_val)}{'%' if is_pct else 'đ'}",
                             "description": v.get("description") or f"Voucher gian hàng chính hãng {shop.shop_name}",
@@ -95,7 +98,7 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
                             "source_type": "SHOP_PAGE",
                             "source_title": f"Gian hàng {shop.shop_name or shop.shop_id}",
                             "source_captured_at": now_iso,
-                            "source_evidence_excerpt": f"Shopee Shop API | Mã: {code} | Đơn từ {int(min_sp):,}đ",
+                            "source_evidence_excerpt": f"Shopee Shop API | {'Mã: ' + code if code else 'Voucher lưu ngay'} | Đơn từ {int(min_sp):,}đ",
                             "verified_at": now_iso,
                             "last_checked_at": now_iso,
                             "confidence_score": 98,
@@ -118,7 +121,10 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
 
         tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
         if not tracked:
+            self.status = "NO_SHOPS_CONFIGURED"
             return []
+        
+        self.status = "HEALTHY"
 
         await self.rate_limiter.acquire()
 

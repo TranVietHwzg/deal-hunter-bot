@@ -15,6 +15,7 @@ from repositories.scan_repository import ScanRepository
 from services.discovery_service import DiscoveryService
 from services.elite_discovery_service import EliteDiscoveryService
 from services.lifecycle_service import LifecycleService
+from core.discovery_orchestrator import DiscoveryOrchestrator
 from models.scan_run import ScanMode
 from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
 
@@ -23,33 +24,40 @@ shop_repo = ShopRepository()
 scan_repo = ScanRepository()
 discovery_service = DiscoveryService(voucher_repo, scan_repo)
 elite_discovery = EliteDiscoveryService(voucher_repo, scan_repo, shop_repo)
+orchestrator = DiscoveryOrchestrator(voucher_repo, shop_repo, scan_repo)
 lifecycle_service = LifecycleService(voucher_repo, scan_repo)
 
 async def seed_default_vouchers():
-    """Đồng bộ ban đầu kho voucher Shopee chiến dịch & mã ẩn chuẩn Elite"""
-    await elite_discovery.run_elite_scan(ScanMode.AUTO)
-    print("[Radar] Đã nạp thành công kho mã Elite Shopee ban đầu (ZERO FREESHIP).")
+    """Đồng bộ ban đầu kho voucher Shopee qua Discovery Orchestrator"""
+    await orchestrator.run_discovery_cycle()
+    print("[Radar] Đã nạp thành công kho quan sát ban đầu qua Discovery Orchestrator.")
 
 async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
-    """Chạy một chu kỳ Radar hoàn chỉnh (Elite Discovery + Lifecycle check)"""
-    # 1. Quét khám phá nguồn Shopee công khai chuẩn Elite
-    scan_res = await elite_discovery.run_elite_scan(ScanMode.AUTO)
+    """Chạy một chu kỳ Radar hoàn chỉnh (Discovery Orchestrator + Lifecycle check)"""
+    # 1. Thu thập đa nguồn và đánh giá độc lập qua Discovery Orchestrator
+    scan_res = await orchestrator.run_discovery_cycle()
 
-    # 2. Gửi thông báo cho các voucher Elite mới phát hiện
+    # 2. Gửi thông báo cho các sự kiện mới phát hiện
     if bot_instance:
         notifier = getattr(bot_instance, "elite_notifier", None)
         for ev in scan_res.get("events_to_notify", []):
             ev_type = ev.get("type")
             v = ev.get("voucher")
-            sc = ev.get("score", 90)
             if not v:
                 continue
+            mapped_type = {
+                "READY_NOW": "ACTIVE_NEW",
+                "UPCOMING": "UPCOMING_KNOWN",
+                "WATCH": "UPCOMING_UNKNOWN",
+                "CODE_REVEALED": "CODE_REVEALED"
+            }.get(ev_type, ev_type)
+
             if notifier:
-                await notifier.notify_elite_voucher(v, ev_type, score=sc)
+                await notifier.notify_elite_voucher(v, mapped_type, score=v.confidence_score)
             else:
-                if ev_type in ("UPCOMING_KNOWN", "UPCOMING_UNKNOWN"):
+                if ev_type in ("UPCOMING", "WATCH"):
                     await bot_instance.broadcast_upcoming_voucher(v)
-                elif ev_type == "ACTIVE_NEW":
+                elif ev_type == "READY_NOW":
                     await bot_instance.broadcast_active_voucher(v)
                 elif ev_type == "CODE_REVEALED":
                     await bot_instance.broadcast_code_revealed(v)

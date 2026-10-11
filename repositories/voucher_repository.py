@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from repositories.base_repository import BaseRepository
 from models.voucher import Voucher, ScopeType, DiscountType, VoucherStatus, VerificationStatus
+from models.observation import VoucherObservation
+from models.source_run import SourceRun
 
 class VoucherRepository(BaseRepository):
     def __init__(self, db_path: Optional[str] = None):
@@ -79,7 +81,12 @@ class VoucherRepository(BaseRepository):
                 "source_evidence_excerpt": "TEXT",
                 "verified_at": "TEXT",
                 "last_checked_at": "TEXT",
-                "percentage_used": "REAL"
+                "percentage_used": "REAL",
+                "claim_type": "TEXT DEFAULT 'CODE'",
+                "verification_level": "TEXT DEFAULT 'OBSERVED_PUBLIC'",
+                "eligibility_status": "TEXT DEFAULT 'PERSONAL_UNKNOWN'",
+                "quality_tags": "TEXT",
+                "evidence_score": "INTEGER DEFAULT 50"
             }
             for col_name, col_type in new_cols.items():
                 if col_name not in cols:
@@ -87,7 +94,6 @@ class VoucherRepository(BaseRepository):
                         cur.execute(f"ALTER TABLE vouchers ADD COLUMN {col_name} {col_type};")
                     except Exception as e:
                         print(f"[VoucherRepository] Lưu ý khi thêm cột {col_name}: {e}")
-
 
             # 2. Bảng voucher_changes
             cur.execute("""
@@ -102,6 +108,56 @@ class VoucherRepository(BaseRepository):
                 FOREIGN KEY (voucher_id) REFERENCES vouchers(id) ON DELETE CASCADE
             );
             """)
+
+            # 3. Bảng voucher_observations (Lưu mọi quan sát đa nguồn)
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS voucher_observations (
+                id TEXT PRIMARY KEY,
+                canonical_id TEXT NOT NULL,
+                source_name TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                raw_code TEXT,
+                claim_type TEXT NOT NULL DEFAULT 'CODE',
+                discount_amount REAL,
+                discount_percent REAL,
+                min_order_value REAL NOT NULL DEFAULT 0,
+                max_discount REAL,
+                observed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                raw_payload_hash TEXT NOT NULL,
+                evidence_excerpt TEXT,
+                http_status INTEGER NOT NULL DEFAULT 200,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (canonical_id) REFERENCES vouchers(id) ON DELETE CASCADE
+            );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_obs_canonical ON voucher_observations(canonical_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_obs_source ON voucher_observations(source_name, observed_at);")
+
+            # 4. Bảng source_runs (Sức khỏe và metrics từng lượt cào)
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS source_runs (
+                id TEXT PRIMARY KEY,
+                source_name TEXT NOT NULL,
+                started_at TIMESTAMP NOT NULL,
+                finished_at TIMESTAMP NOT NULL,
+                pages_requested INTEGER NOT NULL DEFAULT 1,
+                http_success_count INTEGER NOT NULL DEFAULT 0,
+                http_failure_count INTEGER NOT NULL DEFAULT 0,
+                items_raw INTEGER NOT NULL DEFAULT 0,
+                items_normalized INTEGER NOT NULL DEFAULT 0,
+                items_new INTEGER NOT NULL DEFAULT 0,
+                items_updated INTEGER NOT NULL DEFAULT 0,
+                items_rejected_by_rule INTEGER NOT NULL DEFAULT 0,
+                latest_source_timestamp TEXT,
+                parser_version TEXT NOT NULL DEFAULT '1.0.0',
+                status TEXT NOT NULL,
+                error_summary TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_name ON source_runs(source_name, started_at DESC);")
+
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vouchers_status ON vouchers(status);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vouchers_start_time ON vouchers(start_time);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vouchers_scope ON vouchers(scope_type, shop_id);")
@@ -184,6 +240,12 @@ class VoucherRepository(BaseRepository):
             verified_at=row.get("verified_at"),
             last_checked_at=row.get("last_checked_at"),
             percentage_used=float(row["percentage_used"]) if row.get("percentage_used") is not None else None,
+            platform_voucher_id=row.get("platform_voucher_id") or row.get("voucher_id_on_platform"),
+            claim_type=str(row.get("claim_type") or "CODE"),
+            verification_level=str(row.get("verification_level") or "OBSERVED_PUBLIC"),
+            eligibility_status=str(row.get("eligibility_status") or "PERSONAL_UNKNOWN"),
+            quality_tags=json.loads(row["quality_tags"]) if row.get("quality_tags") and isinstance(row["quality_tags"], str) and row["quality_tags"].startswith("[") else [],
+            evidence_score=int(row.get("evidence_score") or 50),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at")
         )
@@ -266,6 +328,12 @@ class VoucherRepository(BaseRepository):
                     "verified_at": voucher.verified_at,
                     "last_checked_at": voucher.last_checked_at or datetime.now(timezone.utc).isoformat(),
                     "percentage_used": voucher.percentage_used,
+                    "platform_voucher_id": voucher.platform_voucher_id,
+                    "claim_type": voucher.claim_type,
+                    "verification_level": voucher.verification_level,
+                    "eligibility_status": voucher.eligibility_status,
+                    "quality_tags": json.dumps(voucher.quality_tags, ensure_ascii=False) if voucher.quality_tags else None,
+                    "evidence_score": voucher.evidence_score,
                     "claim_url": voucher.source_url,
                     "source_url": voucher.source_url,
                     "source_type": voucher.source_type,
@@ -286,8 +354,14 @@ class VoucherRepository(BaseRepository):
                     "id": voucher.id,
                     "platform": voucher.platform,
                     "platform_id": voucher.platform,
-                    "voucher_id_on_platform": voucher.id,
+                    "voucher_id_on_platform": voucher.platform_voucher_id or voucher.id,
+                    "platform_voucher_id": voucher.platform_voucher_id,
                     "voucher_code": voucher.voucher_code,
+                    "claim_type": voucher.claim_type,
+                    "verification_level": voucher.verification_level,
+                    "eligibility_status": voucher.eligibility_status,
+                    "quality_tags": json.dumps(voucher.quality_tags, ensure_ascii=False) if voucher.quality_tags else None,
+                    "evidence_score": voucher.evidence_score,
                     "verification_status": voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else str(voucher.verification_status),
                     "title": voucher.title,
                     "description": voucher.description,
@@ -464,4 +538,176 @@ class VoucherRepository(BaseRepository):
                 summary[st] = count
                 summary["TOTAL"] += count
         return summary
+
+    # -------------------------------------------------------------
+    # 5. Quan sát đa nguồn (Observations) & Sức khỏe nguồn (Source Runs)
+    # -------------------------------------------------------------
+    def add_observation(self, obs: VoucherObservation) -> bool:
+        """Ghi nhận một lần quan sát voucher từ một nguồn cụ thể (không ghi đè mất bằng chứng)"""
+        with self.transaction() as cur:
+            cur.execute("""
+            INSERT INTO voucher_observations (
+                id, canonical_id, source_name, source_type, source_url,
+                raw_code, claim_type, discount_amount, discount_percent,
+                min_order_value, max_discount, observed_at, raw_payload_hash,
+                evidence_excerpt, http_status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                obs.id, obs.canonical_id, obs.source_name, obs.source_type, obs.source_url,
+                obs.raw_code, obs.claim_type, obs.discount_amount, obs.discount_percent,
+                obs.min_order_value, obs.max_discount, obs.observed_at, obs.raw_payload_hash,
+                obs.evidence_excerpt, obs.http_status, obs.created_at
+            ))
+            return True
+
+    def get_observations(self, canonical_id: str) -> List[VoucherObservation]:
+        """Lấy toàn bộ các lần quan sát của voucher canonical này"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT * FROM voucher_observations 
+            WHERE canonical_id = ? 
+            ORDER BY observed_at DESC
+            """, (canonical_id,)).fetchall()
+            return [
+                VoucherObservation(
+                    id=r["id"],
+                    canonical_id=r["canonical_id"],
+                    source_name=r["source_name"],
+                    source_type=r["source_type"],
+                    source_url=r["source_url"],
+                    raw_code=r["raw_code"],
+                    claim_type=r["claim_type"],
+                    discount_amount=r["discount_amount"],
+                    discount_percent=r["discount_percent"],
+                    min_order_value=float(r["min_order_value"] or 0),
+                    max_discount=r["max_discount"],
+                    observed_at=r["observed_at"],
+                    raw_payload_hash=r["raw_payload_hash"],
+                    evidence_excerpt=r["evidence_excerpt"],
+                    http_status=int(r["http_status"] or 200),
+                    created_at=r["created_at"]
+                ) for r in rows
+            ]
+
+    def record_source_run(self, run: SourceRun) -> bool:
+        """Ghi nhận kết quả một chu kỳ quét của nguồn"""
+        with self.transaction() as cur:
+            cur.execute("""
+            INSERT INTO source_runs (
+                id, source_name, started_at, finished_at, pages_requested,
+                http_success_count, http_failure_count, items_raw, items_normalized,
+                items_new, items_updated, items_rejected_by_rule, latest_source_timestamp,
+                parser_version, status, error_summary, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                run.id, run.source_name, run.started_at, run.finished_at, run.pages_requested,
+                run.http_success_count, run.http_failure_count, run.items_raw, run.items_normalized,
+                run.items_new, run.items_updated, run.items_rejected_by_rule, run.latest_source_timestamp,
+                run.parser_version, run.status, run.error_summary, run.created_at
+            ))
+            return True
+
+    def get_latest_source_runs(self, limit: int = 10) -> List[SourceRun]:
+        """Lấy lịch sử các lần chạy gần nhất của các nguồn"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT * FROM source_runs ORDER BY started_at DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [
+                SourceRun(
+                    id=r["id"],
+                    source_name=r["source_name"],
+                    started_at=r["started_at"],
+                    finished_at=r["finished_at"],
+                    pages_requested=r["pages_requested"],
+                    http_success_count=r["http_success_count"],
+                    http_failure_count=r["http_failure_count"],
+                    items_raw=r["items_raw"],
+                    items_normalized=r["items_normalized"],
+                    items_new=r["items_new"],
+                    items_updated=r["items_updated"],
+                    items_rejected_by_rule=r["items_rejected_by_rule"],
+                    latest_source_timestamp=r["latest_source_timestamp"],
+                    parser_version=r["parser_version"],
+                    status=r["status"],
+                    error_summary=r["error_summary"],
+                    created_at=r["created_at"]
+                ) for r in rows
+            ]
+
+    def get_source_health_summary(self) -> Dict[str, Any]:
+        """Tóm tắt sức khỏe mới nhất của tất cả các nguồn"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT sr.* FROM source_runs sr
+            INNER JOIN (
+                SELECT source_name, MAX(started_at) as max_started
+                FROM source_runs GROUP BY source_name
+            ) latest ON sr.source_name = latest.source_name AND sr.started_at = latest.max_started
+            """).fetchall()
+            return {
+                r["source_name"]: {
+                    "status": r["status"],
+                    "items_raw": r["items_raw"],
+                    "items_normalized": r["items_normalized"],
+                    "started_at": r["started_at"],
+                    "error_summary": r["error_summary"]
+                } for r in rows
+            }
+
+    def find_canonical_match(
+        self,
+        platform: str,
+        voucher_code: Optional[str] = None,
+        scope_type: Optional[str] = None,
+        shop_id: Optional[str] = None,
+        start_time: Optional[str] = None,
+        platform_voucher_id: Optional[str] = None,
+        claim_url: Optional[str] = None,
+        discount_value: float = 0,
+        min_order_value: float = 0
+    ) -> Optional[Voucher]:
+        """
+        Tìm kiếm voucher Canonical hiện có theo thứ tự ưu tiên định danh:
+        1. platform + platform_voucher_id
+        2. platform + normalized_code + scope + shop_id
+        3. platform + claim_url + discount + min_order
+        """
+        with self.transaction() as cur:
+            # 1. Trùng platform_voucher_id
+            if platform_voucher_id:
+                row = cur.execute("""
+                SELECT * FROM vouchers 
+                WHERE platform = ? AND platform_voucher_id = ?
+                """, (platform, platform_voucher_id)).fetchone()
+                if row:
+                    return self._row_to_voucher(dict(row))
+
+            # 2. Trùng platform + code + shop_id
+            if voucher_code and voucher_code.strip():
+                clean_code = voucher_code.strip().upper()
+                if shop_id:
+                    row = cur.execute("""
+                    SELECT * FROM vouchers 
+                    WHERE platform = ? AND UPPER(voucher_code) = ? AND shop_id = ?
+                    """, (platform, clean_code, str(shop_id))).fetchone()
+                else:
+                    row = cur.execute("""
+                    SELECT * FROM vouchers 
+                    WHERE platform = ? AND UPPER(voucher_code) = ? AND (shop_id IS NULL OR shop_id = '')
+                    """, (platform, clean_code)).fetchone()
+                if row:
+                    return self._row_to_voucher(dict(row))
+
+            # 3. Voucher không code: Trùng claim_url/source_url + discount + min_order
+            if claim_url and discount_value:
+                row = cur.execute("""
+                SELECT * FROM vouchers 
+                WHERE platform = ? AND (source_url = ? OR claim_url = ?) 
+                  AND discount_value = ? AND min_order_value = ?
+                """, (platform, claim_url, claim_url, discount_value, min_order_value)).fetchone()
+                if row:
+                    return self._row_to_voucher(dict(row))
+
+        return None
 

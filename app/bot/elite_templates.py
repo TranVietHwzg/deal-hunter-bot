@@ -232,13 +232,23 @@ def format_elite_code_revealed(voucher: Voucher, score: int = 90) -> str:
 
 def format_coverage_report(stats: Dict[str, Any], tracked_count: int = 0) -> str:
     cookie_status = "✅ <b>ĐÃ KẾT NỐI</b> (Sẵn sàng vượt Akamai 403)" if stats.get("cookie_enabled") else "⚠️ <b>CHƯA CẤU HÌNH</b> (Khuyên dùng: nạp SHOPEE_COOKIE để mở khóa 100% API)"
+    sources = stats.get("sources", {})
+    source_lines = []
+    if sources:
+        for sname, sinfo in sources.items():
+            st = sinfo.get("status", "HEALTHY")
+            icon = "✅" if st == "HEALTHY" else ("ℹ️" if "NOT_IMPLEMENTED" in st or "NO_SHOPS" in st else "⚠️")
+            source_lines.append(f"  • {icon} <b>{sname}:</b> {st}")
+    sources_block = ("\n" + "\n".join(source_lines)) if source_lines else ""
+
     return (
         "📡 <b>BÁO CÁO ĐỘ BAO PHỦ DỮ LIỆU (ANTI-MISS RADAR)</b>\n"
         "────────────────────\n"
         f"• <b>Shopee Session Cookie:</b> {cookie_status}\n"
         f"• <b>Hub cộng đồng & RSC:</b> ✅ Hoạt động (bloggiamgia.vn)\n"
         f"• <b>Gian hàng theo dõi (/shops):</b> {tracked_count} shop đang quét\n"
-        f"• <b>Chiến dịch toàn sàn & Khung giờ:</b> ✅ Đang theo dõi\n"
+        f"• <b>Chiến dịch toàn sàn:</b> ✅ Đang theo dõi"
+        f"{sources_block}\n"
         "────────────────────\n"
         "🛡️ <b>Cam kết:</b> 100% Zero Freeship & Zero Fake Codes.\n"
         "💡 <i>Mẹo: Thêm các shop bạn muốn săn bằng lệnh <code>/shops add &lt;link_shop&gt;</code>!</i>"
