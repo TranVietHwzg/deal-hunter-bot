@@ -8,6 +8,7 @@ from core.voucher_lifecycle import evaluate_lifecycle_transition, check_upcoming
 from core.voucher_filter import is_worthy_voucher
 from core.elite_voucher_filter import classify_voucher_quality
 from services.dedupe_service import DedupeService
+from config.settings import settings
 
 class LifecycleService:
     def __init__(
@@ -23,11 +24,18 @@ class LifecycleService:
     def _is_qualified(
         self,
         v: Voucher,
-        min_fixed_discount: float = 30000.0,
-        min_percent_rate: float = 30.0,
-        min_percent_cap: float = 30000.0
+        min_fixed_discount: Optional[float] = None,
+        min_percent_rate: Optional[float] = None,
+        min_percent_cap: Optional[float] = None
     ) -> bool:
-        """Kiểm tra điều kiện chất lượng chuẩn HIGH_RATE hoặc ELITE_VALUE"""
+        """Kiểm tra điều kiện chất lượng chuẩn HIGH_RATE hoặc ELITE_VALUE (Single Source of Truth)"""
+        if min_fixed_discount is None:
+            min_fixed_discount = getattr(settings, "ELITE_MIN_FIXED_0D", 30000.0)
+        if min_percent_rate is None:
+            min_percent_rate = getattr(settings, "ELITE_MIN_PERCENT", 30.0)
+        if min_percent_cap is None:
+            min_percent_cap = getattr(settings, "ELITE_MIN_CAP", 30000.0)
+
         q = classify_voucher_quality(v)
         if q.get("is_qualified"):
             return True
@@ -35,9 +43,9 @@ class LifecycleService:
 
     def run_lifecycle_cycle(
         self,
-        min_fixed_discount: float = 30000.0,
-        min_percent_rate: float = 30.0,
-        min_percent_cap: float = 30000.0
+        min_fixed_discount: Optional[float] = None,
+        min_percent_rate: Optional[float] = None,
+        min_percent_cap: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
         Kiểm tra toàn bộ vòng đời của các voucher đang có trong DB:
@@ -46,9 +54,24 @@ class LifecycleService:
         3. Nhắc nhở hẹn giờ T-15m và T-2m cho các voucher đủ điều kiện (HIGH_RATE / ELITE_VALUE).
         Trả về danh sách sự kiện cần gửi thông báo ra Telegram.
         """
+        if min_fixed_discount is None:
+            min_fixed_discount = getattr(settings, "ELITE_MIN_FIXED_0D", 30000.0)
+        if min_percent_rate is None:
+            min_percent_rate = getattr(settings, "ELITE_MIN_PERCENT", 30.0)
+        if min_percent_cap is None:
+            min_percent_cap = getattr(settings, "ELITE_MIN_CAP", 30000.0)
+
         notifications_to_send: List[Dict[str, Any]] = []
 
-        all_vouchers = self.voucher_repo.get_vouchers(limit=500)
+        # Ưu tiên lấy toàn bộ UPCOMING (để không bỏ lỡ lịch nhắc T-15/T-2), kết hợp ACTIVE
+        upcoming_vouchers = self.voucher_repo.get_upcoming_vouchers(days=7)
+        other_vouchers = self.voucher_repo.get_vouchers(limit=500)
+        seen_ids = set()
+        all_vouchers = []
+        for v in upcoming_vouchers + other_vouchers:
+            if v.id not in seen_ids:
+                seen_ids.add(v.id)
+                all_vouchers.append(v)
         for v in all_vouchers:
             # 1. Kiểm tra chuyển trạng thái thời gian thực
             new_status, event_name = evaluate_lifecycle_transition(v)

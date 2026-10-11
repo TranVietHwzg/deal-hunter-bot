@@ -5,6 +5,7 @@ from core.voucher_filter import is_freeship, is_worthy_voucher
 from core.voucher_verify import verify_hunt_only
 from core.voucher_classifier import classify_scope
 from core.voucher_lifecycle import determine_initial_status, parse_vietnam_time
+from config.settings import settings
 
 class UpcomingVoucherDiscovery:
     def __init__(self, voucher_repo: Optional[VoucherRepository] = None):
@@ -13,20 +14,26 @@ class UpcomingVoucherDiscovery:
     def process_collected_vouchers(
         self,
         raw_items: List[Dict[str, Any]],
-        min_fixed_discount: float = 50000.0,
-        min_percent_rate: float = 15.0,
-        min_percent_cap: float = 100000.0,
+        min_fixed_discount: Optional[float] = None,
+        min_percent_rate: Optional[float] = None,
+        min_percent_cap: Optional[float] = None,
         max_lookahead_days: int = 7
     ) -> Dict[str, Any]:
         """
         Xử lý danh sách voucher mới thu thập:
         - Lọc bỏ 100% freeship
-        - Lọc theo ngưỡng giá trị đáng báo
+        - Lọc theo ngưỡng giá trị đáng báo (Single Source of Truth)
         - Phân loại scope
         - Khởi tạo status ban đầu (UPCOMING_UNKNOWN_CODE, UPCOMING_CODE_KNOWN, ACTIVE...)
         - So sánh với DB và phát hiện biến động (code lộ ra, đổi giờ, đổi mức giảm)
         Trả về kết quả thống kê và danh sách sự kiện cần báo.
         """
+        if min_fixed_discount is None:
+            min_fixed_discount = getattr(settings, "ELITE_MIN_FIXED_0D", 30000.0)
+        if min_percent_rate is None:
+            min_percent_rate = getattr(settings, "ELITE_MIN_PERCENT", 30.0)
+        if min_percent_cap is None:
+            min_percent_cap = getattr(settings, "ELITE_MIN_CAP", 30000.0)
         new_count = 0
         updated_count = 0
         events_to_notify: List[Dict[str, Any]] = []

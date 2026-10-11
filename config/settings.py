@@ -41,11 +41,17 @@ class AppSettings(BaseModel):
         default=int(os.environ.get("PORT") or _local_cfg.get("settings", {}).get("web_port", 8000))
     )
 
-    # Core Deal & Voucher Thresholds
-    hot_voucher_threshold: int = Field(default=85)    # >= 85 điểm là HOT
-    min_alert_threshold: int = Field(default=70)      # >= 70 điểm mới gửi cảnh báo thường
-    min_save_amount: float = Field(default=50000.0)   # Giảm tối thiểu 50.000đ
-    min_discount_percent: float = Field(default=15.0) # Hoặc giảm tối thiểu 15%
+    # Core Deal & Voucher Thresholds (Single Source of Truth)
+    ELITE_MIN_FIXED_0D: float = Field(default=30000.0)    # Giảm tối thiểu 30.000đ cho đơn 0đ
+    ELITE_MIN_PERCENT: float = Field(default=30.0)        # Giảm tối thiểu 30%
+    ELITE_MIN_CAP: float = Field(default=30000.0)         # Trần giảm tối thiểu 30.000đ cho mã %
+    ELITE_SCORE_NOTIFY: int = Field(default=70)           # Ngưỡng thông báo: >= 70 điểm (ĐÁNG LẤY)
+    ELITE_SCORE_SUPER: int = Field(default=80)            # Ngưỡng thông báo: >= 80 điểm (SIÊU XỊN)
+
+    hot_voucher_threshold: int = Field(default=80)        # >= 80 điểm là SIÊU XỊN
+    min_alert_threshold: int = Field(default=70)          # >= 70 điểm là ĐÁNG LẤY
+    min_save_amount: float = Field(default=30000.0)       # Giảm tối thiểu 30.000đ
+    min_discount_percent: float = Field(default=30.0)     # Giảm tối thiểu 30%
 
     # Rate Limiting & Safety
     rate_limit_per_minute: int = Field(default=30)

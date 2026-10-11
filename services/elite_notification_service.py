@@ -12,9 +12,11 @@ from app.bot.elite_templates import (
 )
 from app.bot.elite_keyboard import get_elite_voucher_action_keyboard
 
+from config.settings import settings
+
 class EliteNotificationService:
     """Quản lý phát thông báo Elite Voucher lên Telegram:
-    - Kiểm duyệt nghiêm ngặt: điểm < 80 tuyệt đối không gửi
+    - Kiểm duyệt nghiêm ngặt: điểm < 70 tuyệt đối không gửi (Mã 30k/0đ đạt 72đ được duyệt)
     - Chống trùng 12 trường qua NotificationDedupe
     - Gửi thông báo mẫu chuẩn theo Section 10
     """
@@ -29,8 +31,9 @@ class EliteNotificationService:
         score: int = 90,
         reason: str = ""
     ) -> bool:
-        # Ngưỡng bắt buộc: Điểm dưới 80 không gửi Telegram
-        if score < 80:
+        # Ngưỡng bắt buộc: Điểm dưới 70 không gửi Telegram (>=70 là ĐÁNG LẤY, >=80 là SIÊU XỊN)
+        min_notify = getattr(settings, "min_alert_threshold", 70)
+        if score < min_notify:
             return False
 
         # Chống trùng 12 trường

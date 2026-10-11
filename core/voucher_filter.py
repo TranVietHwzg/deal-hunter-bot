@@ -2,50 +2,57 @@ import re
 from typing import Dict, Any, Tuple, Optional
 from models.voucher import Voucher, DiscountType
 
+from config.settings import settings
+
 # Danh sách từ khóa cấm tuyệt đối (Freeship / Vận chuyển)
 FREESHIP_KEYWORDS = [
     "freeship", "free ship", "free shipping", "miễn phí vận chuyển", 
     "mien phi van chuyen", "hỗ trợ phí vận chuyển", "ho tro van chuyen", 
     "trợ giá ship", "tro gia ship", "mã vận chuyển", "ma van chuyen",
-    "giảm cước", "giao hàng", "phí giao hàng", "shipping fee", "hỗ trợ ship"
+    "shipping fee", "hỗ trợ ship"
 ]
 
 def is_freeship(data: Dict[str, Any] or Voucher) -> Tuple[bool, str]:
     """
-    Kiểm tra triệt để 100% xem voucher có phải là mã freeship/vận chuyển hay không.
-    Trả về (True, lý_do) nếu là freeship, (False, "") nếu là voucher giảm giá hàng hợp lệ.
+    Kiểm tra triệt để xem voucher có phải là mã freeship/vận chuyển hay không.
+    Chỉ quét title và voucher_type, KHÔNG quét description hay category_names để tránh loại nhầm hàng giảm giá.
     """
     if isinstance(data, Voucher):
         if data.is_freeship != 0:
             return True, "Trường is_freeship != 0"
-        text_corpus = f"{data.title} {data.description or ''} {' '.join(data.category_names)} {data.source_type}".lower()
+        title = data.title or ""
+        vtype = str(data.scope_type.value if hasattr(data.scope_type, 'value') else data.scope_type)
     else:
         if data.get("is_freeship") and int(data.get("is_freeship")) != 0:
             return True, "Trường is_freeship != 0"
         title = str(data.get("title", ""))
-        desc = str(data.get("description", ""))
         vtype = str(data.get("voucher_type", "") or data.get("scope_type", ""))
-        cat = str(data.get("category", "") or data.get("category_names", ""))
-        text_corpus = f"{title} {desc} {vtype} {cat}".lower()
+
+    text_to_scan = f"{title} {vtype}".lower()
 
     for kw in FREESHIP_KEYWORDS:
-        if kw in text_corpus:
+        if kw in text_to_scan:
             return True, f"Phát hiện từ khóa cấm: '{kw}'"
 
     return False, ""
 
 def is_worthy_voucher(
     voucher: Voucher or Dict[str, Any],
-    min_fixed_discount: float = 50000.0,
-    min_percent_rate: float = 15.0,
-    min_percent_cap: float = 100000.0
+    min_fixed_discount: Optional[float] = None,
+    min_percent_rate: Optional[float] = None,
+    min_percent_cap: Optional[float] = None
 ) -> bool:
     """
-    Tiêu chuẩn voucher 'xịn' đáng phát cảnh báo:
-    - Giảm tiền cố định từ 50.000đ; hoặc
-    - Giảm từ 15% trở lên với mức giảm tối đa từ 100.000đ; hoặc
-    - Thỏa mãn cấu hình riêng của người dùng.
+    Tiêu chuẩn voucher 'xịn' đáng phát cảnh báo (Single Source of Truth từ config/settings.py):
+    - Mặc định: Giảm tiền từ 30.000đ; hoặc giảm từ 30% với trần từ 30.000đ.
     """
+    if min_fixed_discount is None:
+        min_fixed_discount = getattr(settings, "ELITE_MIN_FIXED_0D", 30000.0)
+    if min_percent_rate is None:
+        min_percent_rate = getattr(settings, "ELITE_MIN_PERCENT", 30.0)
+    if min_percent_cap is None:
+        min_percent_cap = getattr(settings, "ELITE_MIN_CAP", 30000.0)
+
     if isinstance(voucher, Voucher):
         dtype = voucher.discount_type.value if isinstance(voucher.discount_type, DiscountType) else str(voucher.discount_type)
         dval = float(voucher.discount_value)

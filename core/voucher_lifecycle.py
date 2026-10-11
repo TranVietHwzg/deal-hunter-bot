@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Tuple, Dict, Any
 from models.voucher import Voucher, VoucherStatus
+from config.settings import settings
 
 VN_TZ = timezone(timedelta(hours=7))
 
@@ -30,9 +31,15 @@ def parse_vietnam_time(time_str: str) -> Optional[datetime]:
         minute = int(m_full.group(2))
         day = int(m_full.group(3))
         month = int(m_full.group(4))
-        year = int(m_full.group(5)) if m_full.group(5) else datetime.now(VN_TZ).year
+        year_provided = bool(m_full.group(5))
+        year = int(m_full.group(5)) if year_provided else datetime.now(VN_TZ).year
         try:
-            return datetime(year, month, day, hour, minute, tzinfo=VN_TZ)
+            res_dt = datetime(year, month, day, hour, minute, tzinfo=VN_TZ)
+            # Nếu năm không được cung cấp và thời gian rơi vào quá khứ quá 7 ngày,
+            # tự động cộng thêm 1 năm (chuyển giao năm mới)
+            if not year_provided and res_dt < (datetime.now(VN_TZ) - timedelta(days=7)):
+                res_dt = res_dt.replace(year=year + 1)
+            return res_dt
         except ValueError:
             pass
 
@@ -92,20 +99,31 @@ def evaluate_lifecycle_transition(voucher: Voucher) -> Tuple[Optional[VoucherSta
     if end_dt and now > end_dt and voucher.status not in (VoucherStatus.EXPIRED, VoucherStatus.CANCELLED):
         return VoucherStatus.EXPIRED, "VOUCHER_EXPIRED"
 
-    # 2. Đến giờ mở mã (UPCOMING_CODE_KNOWN -> ACTIVE)
+    # 2. Khôi phục từ EXHAUSTED sang ACTIVE nếu còn hạn và percentage_used < 100
+    if voucher.status == VoucherStatus.EXHAUSTED:
+        if voucher.percentage_used is not None and voucher.percentage_used < 100:
+            if not end_dt or now <= end_dt:
+                return VoucherStatus.ACTIVE, "VOUCHER_RESTOCKED"
+
+    # 3. Chuyển sang EXHAUSTED nếu đã hết lượt dùng
+    if voucher.status == VoucherStatus.ACTIVE:
+        if voucher.percentage_used is not None and voucher.percentage_used >= 100:
+            return VoucherStatus.EXHAUSTED, "VOUCHER_EXHAUSTED"
+
+    # 4. Đến giờ mở mã (UPCOMING_CODE_KNOWN -> ACTIVE)
     if voucher.status == VoucherStatus.UPCOMING_CODE_KNOWN:
         if start_dt and now >= start_dt:
             if not end_dt or now <= end_dt:
                 return VoucherStatus.ACTIVE, "VOUCHER_OPENED"
 
-    # 3. Đã có code từ UPCOMING_UNKNOWN_CODE
+    # 5. Đã có code từ UPCOMING_UNKNOWN_CODE
     if voucher.status == VoucherStatus.UPCOMING_UNKNOWN_CODE and voucher.voucher_code:
         if start_dt and start_dt > now:
             return VoucherStatus.UPCOMING_CODE_KNOWN, "CODE_REVEALED"
         elif not end_dt or now <= end_dt:
             return VoucherStatus.ACTIVE, "VOUCHER_OPENED"
 
-    # 4. Voucher từ DISCOVERED có mã hoặc là SAVE_BUTTON
+    # 6. Voucher từ DISCOVERED có mã hoặc là SAVE_BUTTON
     if voucher.status == VoucherStatus.DISCOVERED:
         if voucher.voucher_code or getattr(voucher, "claim_type", "") == "SAVE_BUTTON":
             if start_dt and start_dt > now:
@@ -118,12 +136,15 @@ def evaluate_lifecycle_transition(voucher: Voucher) -> Tuple[Optional[VoucherSta
 def check_upcoming_reminder(voucher: Voucher, elite_score: Optional[int] = None) -> Optional[str]:
     """
     Kiểm tra xem voucher sắp mở có cần gửi nhắc nhở không.
-    Theo chuẩn Elite: Chỉ gửi nhắc T-15m và T-2m cho voucher SIÊU XỊN (90–100 điểm).
+    Hỗ trợ cả UPCOMING_CODE_KNOWN và UPCOMING_UNKNOWN_CODE cho các mốc T-24h, T-15m, T-2m.
+    Chỉ gửi cho voucher đạt ngưỡng điểm thông báo (mặc định >= 70 điểm).
     """
-    if voucher.status != VoucherStatus.UPCOMING_CODE_KNOWN or not voucher.voucher_code:
+    raw_status = voucher.status.value if isinstance(voucher.status, VoucherStatus) else str(voucher.status)
+    if raw_status not in ("UPCOMING_CODE_KNOWN", "UPCOMING_UNKNOWN_CODE"):
         return None
 
-    if elite_score is not None and elite_score < 90:
+    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 70)
+    if elite_score is not None and elite_score < min_notify:
         return None
 
     now = datetime.now(VN_TZ)
@@ -132,9 +153,11 @@ def check_upcoming_reminder(voucher: Voucher, elite_score: Optional[int] = None)
         return None
 
     diff_seconds = (start_dt - now).total_seconds()
-    if 2 * 60 < diff_seconds <= 15 * 60:
-        return "REMINDER_15M"
-    elif 0 < diff_seconds <= 2 * 60:
+    if 0 < diff_seconds <= 2 * 60:
         return "REMINDER_2M"
+    elif 2 * 60 < diff_seconds <= 15 * 60:
+        return "REMINDER_15M"
+    elif 15 * 60 < diff_seconds <= 24 * 3600:
+        return "REMINDER_24H"
 
     return None

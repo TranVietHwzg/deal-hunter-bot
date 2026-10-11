@@ -2,34 +2,36 @@ import re
 from typing import Dict, Any, Tuple, Optional
 from models.voucher import Voucher, DiscountType, VerificationStatus
 
+from config.settings import settings
+
 # Danh sách từ khóa cấm tuyệt đối (Freeship / Vận chuyển)
 FREESHIP_KEYWORDS = [
     "freeship", "free ship", "free shipping", "miễn phí vận chuyển", 
     "mien phi van chuyen", "hỗ trợ phí vận chuyển", "ho tro van chuyen", 
     "trợ giá ship", "tro gia ship", "mã vận chuyển", "ma van chuyen",
-    "giảm cước", "giao hàng", "phí giao hàng", "shipping fee", "hỗ trợ ship"
+    "shipping fee", "hỗ trợ ship"
 ]
 
 def is_freeship(data: Dict[str, Any] or Voucher) -> Tuple[bool, str]:
     """
-    Kiểm tra triệt để 100% xem voucher có phải là mã freeship/vận chuyển hay không.
-    Trả về (True, lý_do) nếu là freeship, (False, "") nếu là voucher giảm giá hàng hợp lệ.
+    Kiểm tra triệt để xem voucher có phải là mã freeship/vận chuyển hay không.
+    Chỉ quét title và voucher_type, KHÔNG quét description hay category_names để tránh loại nhầm sản phẩm.
     """
     if isinstance(data, Voucher):
         if data.is_freeship != 0:
             return True, "Trường is_freeship != 0"
-        text_corpus = f"{data.title} {data.description or ''} {' '.join(data.category_names)} {data.source_type}".lower()
+        title = data.title or ""
+        vtype = str(data.scope_type.value if hasattr(data.scope_type, 'value') else data.scope_type)
     else:
         if data.get("is_freeship") and int(data.get("is_freeship")) != 0:
             return True, "Trường is_freeship != 0"
         title = str(data.get("title", ""))
-        desc = str(data.get("description", ""))
         vtype = str(data.get("voucher_type", "") or data.get("scope_type", ""))
-        cat = str(data.get("category", "") or data.get("category_names", ""))
-        text_corpus = f"{title} {desc} {vtype} {cat}".lower()
+
+    text_to_scan = f"{title} {vtype}".lower()
 
     for kw in FREESHIP_KEYWORDS:
-        if kw in text_corpus:
+        if kw in text_to_scan:
             return True, f"Phát hiện từ khóa cấm freeship: '{kw}'"
 
     return False, ""
@@ -163,15 +165,18 @@ def is_elite_voucher(
         return False, f"Loại: Giảm {int(dval):,}đ nhưng đơn tối thiểu {int(min_o):,}đ > 0đ"
 
     elif dtype in ("PERCENT", "PERCENTAGE"):
-        # Phải giảm ít nhất 30%
-        if dval < 30.0:
-            return False, f"Loại: Giảm {dval:.0f}% < 30%"
+        min_pct = getattr(settings, "ELITE_MIN_PERCENT", 30.0)
+        min_cap = getattr(settings, "ELITE_MIN_CAP", 30000.0)
 
-        # Phải có trần giảm rõ ràng và >= 50.000đ
+        # Phải giảm ít nhất 30%
+        if dval < min_pct:
+            return False, f"Loại: Giảm {dval:.0f}% < {min_pct:.0f}%"
+
+        # Phải có trần giảm rõ ràng và >= 30.000đ
         if max_d is None:
             return False, "Loại: Giảm % nhưng không công bố mức giảm tối đa"
-        if max_d < 50000.0:
-            return False, f"Loại: Mức giảm tối đa {int(max_d):,}đ < 50.000đ"
+        if max_d < min_cap:
+            return False, f"Loại: Mức giảm tối đa {int(max_d):,}đ < {int(min_cap):,}đ"
 
         # Kiểm tra điều kiện đơn tối thiểu không quá cao so với max_discount
         # Ví dụ: Giảm 30% tối đa 100k, đơn từ 2 triệu -> Loại (2tr / 100k = 20 > 4)
@@ -198,8 +203,8 @@ def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
     """
     Phân loại nhãn chất lượng độc lập theo thiết kế kiến trúc chuẩn:
     - Loại trừ: Freeship, hết hạn, hủy, không hợp lệ
-    - HIGH_RATE: Giảm > 30% (kể cả trần nhỏ, nhằm bắt trọn deal tỷ lệ cao)
-    - ELITE_VALUE: Giảm >= 30.000đ đơn 0đ HOẶC giảm > 30% với mức tiết kiệm dự kiến >= 30.000đ
+    - HIGH_RATE: Giảm >= 30% (kể cả trần nhỏ, nhằm bắt trọn deal tỷ lệ cao)
+    - ELITE_VALUE: Giảm >= 30.000đ đơn 0đ HOẶC giảm >= 30% với mức tiết kiệm dự kiến >= 30.000đ
     """
     ship, reason = is_freeship(data)
     if ship:
@@ -207,17 +212,20 @@ def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
 
     dtype, dval, max_d, min_o = extract_voucher_fields(data)
     tags = []
+    min_pct = getattr(settings, "ELITE_MIN_PERCENT", 30.0)
+    min_cap = getattr(settings, "ELITE_MIN_CAP", 30000.0)
+    min_fixed = getattr(settings, "ELITE_MIN_FIXED_0D", 30000.0)
 
     if dtype in ("PERCENT", "PERCENTAGE"):
-        if dval > 30.0:
+        if dval >= min_pct:
             tags.append("HIGH_RATE")
             # Đạt ELITE_VALUE nếu có trần >= 30.000đ hoặc tiết kiệm thực tế >= 30.000đ
             effective_saving = max_d if (max_d is not None) else (min_o * (dval / 100.0) if min_o > 0 else 0)
-            if (max_d is not None and max_d >= 30000.0) or effective_saving >= 30000.0:
+            if (max_d is not None and max_d >= min_cap) or effective_saving >= min_cap:
                 tags.append("ELITE_VALUE")
 
     elif dtype in ("FIXED", "FIXED_AMOUNT"):
-        if dval >= 30000.0 and min_o == 0:
+        if dval >= min_fixed and min_o == 0:
             tags.append("ELITE_VALUE")
         elif dval >= 50000.0 and (min_o / dval <= 3.0):
             tags.append("ELITE_VALUE")
@@ -226,6 +234,6 @@ def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
     return {
         "is_qualified": is_qualified,
         "tags": tags,
-        "reason": f"Đạt nhãn {', '.join(tags)}" if tags else "Không đạt tiêu chí 30k/0đ hoặc >30%"
+        "reason": f"Đạt nhãn {', '.join(tags)}" if tags else "Không đạt tiêu chí 30k/0đ hoặc >=30%"
     }
 

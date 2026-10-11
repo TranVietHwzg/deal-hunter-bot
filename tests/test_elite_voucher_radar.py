@@ -101,7 +101,7 @@ def test_6_percent_30_cap_10k_rejected():
     }
     is_elite, reason = is_elite_voucher(v)
     assert not is_elite
-    assert "< 50.000đ" in reason
+    assert "< 30,000đ" in reason or "< 30.000đ" in reason
 
 # 7. Giảm 30%, đơn tối thiểu 2 triệu → loại
 def test_7_percent_30_min_order_2m_rejected():
@@ -367,7 +367,7 @@ def test_17_personal_wallet_connected_adds_score_not_lower_threshold():
         source_type=""
     )
     import asyncio
-    res = asyncio.run(notifier.notify_elite_voucher(low_v, "ACTIVE_NEW", score=79))
+    res = asyncio.run(notifier.notify_elite_voucher(low_v, "ACTIVE_NEW", score=69))
     assert res is False
 
 # 18. Nút “Quét ngay” chỉ trả về voucher Elite mới/cập nhật
@@ -402,3 +402,101 @@ def test_18_scan_now_returns_only_elite_vouchers():
 
     import asyncio
     asyncio.run(_test())
+
+# 19. Voucher đúng 30% chính xác (ELITE_MIN_PERCENT=30) đạt Elite
+def test_19_exact_30_percent_accepted():
+    v = {
+        "discount_type": "PERCENT",
+        "discount_value": 30.0,
+        "max_discount": 30000.0,
+        "min_order_value": 100000.0,
+        "title": "Giảm đúng 30% tối đa 30k",
+        "is_freeship": 0
+    }
+    is_elite, reason = is_elite_voucher(v)
+    assert is_elite is True
+    assert "Đạt Elite" in reason
+
+# 20. Voucher 30k đơn 0đ PLATFORM đạt 72 điểm và được phát thông báo (ngưỡng 70 điểm)
+def test_20_platform_30k_0d_score_72_and_notified():
+    async def _test():
+        bot = DummyBot()
+        notifier = EliteNotificationService(bot)
+        v = {
+            "platform": "SHOPEE",
+            "voucher_code": "PLAT30K",
+            "scope_type": "PLATFORM",
+            "discount_type": "FIXED",
+            "discount_value": 30000.0,
+            "min_order_value": 0.0,
+            "title": "Mã sàn giảm 30k đơn 0đ",
+            "start_time": "00:00 12/10/2026",
+            "end_time": "23:59 12/10/2026",
+            "source_type": "CAMPAIGN_PAGE",
+            "source_url": "https://shopee.vn/m/ma-giam-gia",
+            "is_freeship": 0
+        }
+        score, label, breakdown = calculate_elite_score(v)
+        # 30k đơn 0đ đạt 74 điểm (>= ngưỡng 70 điểm để phát thông báo)
+        assert score >= 70
+        assert score == 74
+        assert "ĐÁNG LẤY" in label
+
+        v_obj = Voucher(
+            id="V_30K_0D",
+            platform="SHOPEE",
+            voucher_code="PLAT30K",
+            title="Mã sàn giảm 30k đơn 0đ",
+            scope_type=ScopeType.PLATFORM,
+            discount_type=DiscountType.FIXED,
+            discount_value=30000,
+            min_order_value=0,
+            start_time="00:00 12/10/2026",
+            end_time="23:59 12/10/2026",
+            status=VoucherStatus.ACTIVE,
+            source_url="https://shopee.vn/m/ma-giam-gia",
+            source_type="CAMPAIGN_PAGE"
+        )
+        sent = await notifier.notify_elite_voucher(v_obj, "ACTIVE_NEW", score=score)
+        assert sent is True
+        assert len(bot.sent_messages) == 1
+        assert "PLAT30K" in bot.sent_messages[0]["text"]
+        assert "74/100" in bot.sent_messages[0]["text"]
+
+    import asyncio
+    asyncio.run(_test())
+
+# 21. Vòng đời: Voucher EXHAUSTED được restock chuyển lại ACTIVE (VOUCHER_RESTOCKED)
+def test_21_lifecycle_restock_transition():
+    from core.voucher_lifecycle import evaluate_lifecycle_transition
+    now = datetime.now(VN_TZ)
+    v = Voucher(
+        id="V_RESTOCK_TEST",
+        platform="SHOPEE",
+        voucher_code="RESTOCK50",
+        title="Mã Restock",
+        scope_type=ScopeType.PLATFORM,
+        discount_type=DiscountType.FIXED,
+        discount_value=50000,
+        min_order_value=0,
+        start_time=(now - timedelta(hours=1)).strftime("%H:%M %d/%m/%Y"),
+        end_time=(now + timedelta(hours=5)).strftime("%H:%M %d/%m/%Y"),
+        status=VoucherStatus.EXHAUSTED,
+        percentage_used=80,  # Vừa được mở thêm lượt (< 100)
+        source_url="https://shopee.vn",
+        source_type="CAMPAIGN_PAGE"
+    )
+    new_status, event_name = evaluate_lifecycle_transition(v)
+    assert new_status == VoucherStatus.ACTIVE
+    assert event_name == "VOUCHER_RESTOCKED"
+
+# 22. Parse thời gian tự động rollover năm mới nếu không có năm và bị quá khứ > 7 ngày
+def test_22_year_rollover_datetime():
+    from core.voucher_lifecycle import parse_vietnam_time
+    # Ví dụ quét "00:00 01/01" vào tháng 12 năm nay
+    # Nếu parse mà ra quá khứ > 7 ngày, nó sẽ tự động tăng lên năm sau
+    current_year = datetime.now(VN_TZ).year
+    parsed = parse_vietnam_time("00:00 01/01")
+    assert parsed is not None
+    # 01/01 của năm nay đã qua nhiều tháng, nên sẽ rollover sang năm sau
+    assert parsed.year == current_year + 1

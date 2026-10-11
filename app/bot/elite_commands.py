@@ -38,7 +38,7 @@ class EliteCommands:
         self.settings = {
             "min_fixed_discount": 30000.0,
             "min_percent_rate": 30.0,
-            "min_elite_score": 80,
+            "min_elite_score": 70,
             "reminder_15m": True,
             "reminder_2m": True,
             "platform_vouchers": True,

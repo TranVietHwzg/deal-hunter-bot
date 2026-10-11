@@ -7,6 +7,7 @@ from repositories.scan_repository import ScanRepository
 from repositories.voucher_repository import VoucherRepository
 from repositories.shop_repository import ShopRepository
 from core.elite_voucher_filter import is_elite_voucher
+from core.voucher_filter import is_worthy_voucher, is_freeship
 from core.elite_score_calculator import calculate_elite_score
 from core.voucher_lifecycle import determine_initial_status
 from core.voucher_classifier import classify_scope
@@ -47,7 +48,7 @@ class EliteDiscoveryService:
     async def run_elite_scan(
         self,
         scan_mode: ScanMode = ScanMode.AUTO,
-        min_elite_score: int = 80
+        min_elite_score: int = 70
     ) -> Dict[str, Any]:
         scan_id = f"SCAN_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         self.scan_repo.start_scan_run(scan_id, scan_mode, "elite_radar_sources")
@@ -131,9 +132,45 @@ class EliteDiscoveryService:
 
             # Nếu không đạt Elite:
             if not is_elite:
+                is_ship, _ = is_freeship(item)
+                # Kiểm tra xem có đạt chuẩn giá trị (>=30k đơn 0đ hoặc >=30% cap>=30k) đang chờ lộ mã hoặc xác minh không
+                # Tuyệt đối không lưu theo dõi nếu là mã freeship
+                if not is_ship and is_worthy_voucher(item):
+                    watch_status = (
+                        VoucherStatus.UPCOMING_UNKNOWN_CODE
+                        if (ver_status == VerificationStatus.UPCOMING_UNKNOWN_CODE or not code)
+                        else (VoucherStatus.UNVERIFIED if ver_status == VerificationStatus.UNVERIFIED else VoucherStatus.DISCOVERED)
+                    )
+                    watch_model = Voucher(
+                        id=str(item.get("id") or item.get("voucher_id") or f"WATCH_{code or 'NOCODE'}_{int(item.get('discount_value', 0))}"),
+                        platform="SHOPEE",
+                        voucher_code=code,
+                        verification_status=ver_status,
+                        title=str(item.get("title", "Shopee Voucher")),
+                        description=item.get("description"),
+                        scope_type=scope,
+                        discount_type=item.get("discount_type", "FIXED"),
+                        discount_value=float(item.get("discount_value", 0)),
+                        max_discount=float(item.get("max_discount")) if item.get("max_discount") is not None else None,
+                        min_order_value=float(item.get("min_order_value", 0)),
+                        start_time=start_t,
+                        end_time=end_t,
+                        status=watch_status,
+                        is_freeship=0,
+                        source_url=str(item.get("source_url") or item.get("claim_url") or "https://shopee.vn"),
+                        source_type=str(item.get("source_type") or "COMMUNITY_FEED"),
+                        source_title=item.get("source_title"),
+                        source_captured_at=item.get("source_captured_at"),
+                        source_evidence_excerpt=item.get("source_evidence_excerpt"),
+                        percentage_used=item.get("percentage_used")
+                    )
+                    self.voucher_repo.upsert(watch_model)
+                    # Không tăng items_rejected vì đây là deal tiềm năng được lưu theo dõi (WATCH/UPCOMING_UNKNOWN_CODE)
+                    continue
+
                 items_rejected += 1
                 # Vẫn lưu vào database nếu không phải freeship để phục vụ audit / unverified
-                if not item.get("is_freeship"):
+                if not is_ship:
                     rej_model = Voucher(
                         id=str(item.get("id") or item.get("voucher_id") or f"REJ_{code or 'NOCODE'}_{int(item.get('discount_value', 0))}"),
                         platform="SHOPEE",

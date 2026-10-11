@@ -15,6 +15,9 @@ from sources.shopee_shop_campaigns import ShopeeShopCampaignSource
 from sources.community_voucher_source import CommunityVoucherSource
 from sources.live_video_voucher_source import LiveVideoVoucherSource
 from sources.payment_voucher_source import PaymentVoucherSource
+from sources.public_banner_source import PublicBannerSource
+from sources.leak_inbox_source import LeakInboxSource
+from sources.personal_eligible_voucher_source import PersonalEligibleVoucherSource
 
 class DiscoveryOrchestrator:
     """
@@ -22,7 +25,7 @@ class DiscoveryOrchestrator:
     1. Thu thập mọi Raw Observations từ toàn bộ nguồn công khai, shop, cộng đồng, live.
     2. Ghi nhận đo lường sức khỏe (source_runs) cho từng nguồn.
     3. Ghép nối Canonical Voucher đa tầng & Lưu trữ bằng chứng quan sát (1 Canonical : N Observations).
-    4. Tách tầng đánh giá chất lượng (HIGH_RATE >30%, ELITE_VALUE >=30k/0đ hoặc >30% saving >=30k).
+    4. Tách tầng đánh giá chất lượng (HIGH_RATE >=30%, ELITE_VALUE >=30k/0đ hoặc >=30% saving >=30k).
     5. Phân loại thông báo (READY_NOW, WATCH, UPCOMING) và chống spam bằng fingerprint.
     """
     def __init__(
@@ -43,6 +46,9 @@ class DiscoveryOrchestrator:
             CommunityVoucherSource(),
             LiveVideoVoucherSource(),
             PaymentVoucherSource(),
+            PublicBannerSource(),
+            LeakInboxSource(),
+            PersonalEligibleVoucherSource(is_connected=False),
         ]
 
     async def run_discovery_cycle(self) -> Dict[str, Any]:

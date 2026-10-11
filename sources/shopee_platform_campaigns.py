@@ -5,7 +5,7 @@ import httpx
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from sources.base_source import BaseVoucherSource
-from core.voucher_filter import is_freeship
+from core.voucher_filter import is_freeship, is_worthy_voucher
 
 VN_TZ = timezone(timedelta(hours=7))
 
@@ -25,7 +25,10 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
         }
         self.public_campaign_urls = [
             "https://shopee.vn/m/ma-giam-gia",
-            "https://shopee.vn/m/khung-gio-vang"
+            "https://shopee.vn/m/khung-gio-vang",
+            "https://shopee.vn/m/sieu-sale-cong-nghe",
+            "https://shopee.vn/mall",
+            "https://shopee.vn/m/sale-giua-thang"
         ]
 
     async def _fetch_public_page_vouchers(self, url: str) -> List[Dict[str, Any]]:
@@ -249,6 +252,10 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
         for url in self.public_campaign_urls:
             page_vouchers = await self._fetch_public_page_vouchers(url)
             combined_items.extend(page_vouchers)
+
+        # 1b. Kết hợp danh mục chiến dịch động đã quan sát đạt chuẩn worthy (>=30k/0đ hoặc >=30%)
+        catalog_items = self._get_dynamic_campaign_catalog()
+        combined_items.extend([c for c in catalog_items if is_worthy_voucher(c)])
 
         # 2. Lọc sạch qua Zero Freeship
         clean_vouchers = []

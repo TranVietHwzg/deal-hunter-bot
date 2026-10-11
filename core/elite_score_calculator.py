@@ -172,10 +172,10 @@ def calculate_elite_score(
     total_score = score_saving + score_rate + score_min_order + score_scope + score_trust + score_urgency
     total_score = max(0, min(100, total_score))
 
-    if total_score >= 90:
+    if total_score >= 80:
         label = "🔥 SIÊU XỊN"
-    elif total_score >= 80:
-        label = "✅ ĐÁNG LẤY"
+    elif total_score >= 70:
+        label = "💎 ĐÁNG LẤY"
     else:
         label = "Không đủ chuẩn"
 

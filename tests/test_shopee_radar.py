@@ -60,10 +60,10 @@ def setup_test_db():
 def test_zero_freeship_filter():
     freeship_samples = [
         {"title": "Mã Miễn Phí Vận Chuyển Toàn Sàn", "discount_value": 30000},
-        {"title": "Giảm giá sâu", "description": "Hỗ trợ phí vận chuyển 25k", "discount_value": 25000},
+        {"title": "Hỗ trợ phí vận chuyển 25k", "discount_value": 25000},
         {"title": "Freeship Xtra Shopee", "discount_value": 50000},
-        {"title": "Voucher đơn 0đ", "category": "Mã Vận Chuyển", "discount_value": 20000},
-        {"title": "Giảm cước giao hàng đơn từ 50k", "discount_value": 15000}
+        {"title": "Mã Vận Chuyển 20k", "discount_value": 20000},
+        {"title": "Mã freeship đơn từ 50k", "discount_value": 15000}
     ]
     for sample in freeship_samples:
         is_ship, reason = is_freeship(sample)
@@ -71,9 +71,11 @@ def test_zero_freeship_filter():
 
     valid_voucher = {
         "title": "Mã Giảm 100k Đơn Từ 400k",
-        "description": "Giảm trực tiếp giá sản phẩm",
+        "description": "Giao hàng nhanh 24h, hỗ trợ ship",
         "category": "Điện Tử",
+        "discount_type": "FIXED",
         "discount_value": 100000,
+        "min_order_value": 400000,
         "is_freeship": 0
     }
     is_ship, _ = is_freeship(valid_voucher)

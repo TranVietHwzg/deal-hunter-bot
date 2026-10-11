@@ -121,6 +121,15 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
 
         tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
         if not tracked:
+            # Tự động gieo mầm (seed) các gian hàng Mall công nghệ mục tiêu để không bị sót voucher shop
+            try:
+                self.shop_repo.add_shop("318414434", "Anker Official Store", "https://shopee.vn/anker_official_store_vn")
+                self.shop_repo.add_shop("290130836", "Baseus Official Mall", "https://shopee.vn/baseus_official_mall")
+                tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
+            except Exception:
+                pass
+
+        if not tracked:
             self.status = "NO_SHOPS_CONFIGURED"
             return []
         

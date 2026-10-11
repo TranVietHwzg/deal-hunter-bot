@@ -7,7 +7,7 @@ from models.voucher import Voucher, ScopeType, VoucherStatus, VerificationStatus
 from models.observation import VoucherObservation
 from repositories.voucher_repository import VoucherRepository
 from repositories.scan_repository import ScanRepository
-from core.voucher_lifecycle import determine_initial_status
+from core.voucher_lifecycle import determine_initial_status, parse_vietnam_time
 
 class DedupeService:
     def __init__(
@@ -25,16 +25,24 @@ class DedupeService:
     @staticmethod
     def calculate_fingerprint(voucher: Voucher, event_type: str = "") -> str:
         """
-        Tính toán fingerprint:
-        platform + voucher_code + scope_type + shop_id + start_time + end_time + discount_value + min_order_value + status (+ event_type)
+        Tính toán fingerprint định danh nội dung voucher:
+        platform + voucher_code + scope_type + shop_id + normalized_start + normalized_end + discount_value + min_order_value + max_discount + event_type
+        Loại bỏ 'status' để tránh tạo fingerprint mới và gửi trùng alert khi voucher chuyển trạng thái (UPCOMING -> ACTIVE).
         """
-        code = str(voucher.voucher_code or "NO_CODE")
+        code = str(voucher.voucher_code or "NO_CODE").strip().upper()
         stype = voucher.scope_type.value if isinstance(voucher.scope_type, ScopeType) else str(voucher.scope_type)
-        sid = str(voucher.shop_id or "NO_SHOP")
-        status = voucher.status.value if isinstance(voucher.status, VoucherStatus) else str(voucher.status)
+        sid = str(voucher.shop_id or "NO_SHOP").strip().lower()
+        max_d = int(voucher.max_discount) if voucher.max_discount is not None else 0
+
+        # Chuẩn hóa thời gian bắt đầu và kết thúc
+        s_dt = parse_vietnam_time(voucher.start_time)
+        e_dt = parse_vietnam_time(voucher.end_time)
+        norm_start = s_dt.isoformat() if s_dt else str(voucher.start_time).strip()
+        norm_end = e_dt.isoformat() if e_dt else str(voucher.end_time).strip()
+
         raw_str = (
-            f"{voucher.platform}_{code}_{stype}_{sid}_{voucher.start_time}_"
-            f"{voucher.end_time}_{int(voucher.discount_value)}_{int(voucher.min_order_value)}_{status}_{event_type}"
+            f"{voucher.platform}_{code}_{stype}_{sid}_{norm_start}_"
+            f"{norm_end}_{int(voucher.discount_value)}_{int(voucher.min_order_value)}_{max_d}_{event_type}"
         )
         return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
 
