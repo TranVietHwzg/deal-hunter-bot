@@ -52,50 +52,52 @@ class EliteCommands:
             "📡 <b>ELITE SHOPEE VOUCHER RADAR</b>\n"
             "────────────────────\n"
             "Hệ thống săn mã Shopee giá trị thực sự cho cá nhân:\n"
-            "• 🔥 <b>Chỉ báo mã đạt chuẩn Elite (>= 80/100 điểm)</b>\n"
+            "• 🔥 <b>Chỉ báo mã đạt chuẩn Elite (>= 70/100 điểm)</b>\n"
             "• 🛡️ <b>100% Xác minh nguồn gốc & bằng chứng thời gian</b>\n"
-            "• 💎 <b>Giảm từ 30k đơn 0đ hoặc từ 50k tỷ lệ vàng</b>\n"
-            "• ⚡ <b>Giảm từ 30%, trần tối thiểu 50k</b>\n"
+            "• 💎 <b>Giảm từ 30k đơn 0đ hoặc mã to 100k-1M tỷ lệ chuẩn</b>\n"
+            "• ⚡ <b>Giảm từ 30%, trần tối thiểu 30k</b>\n"
             "• 🚫 <b>TUYỆT ĐỐI KHÔNG FREESHIP & KHÔNG MÃ ẢO</b>\n\n"
             "Chọn chức năng bên dưới để bắt đầu:"
         )
 
     async def handle_super_vouchers(self) -> Tuple[str, Dict[str, Any]]:
-        """Xử lý nút: 🔥 Mã siêu xịn (Chỉ hiển thị mã đã xác minh VERIFIED_ACTIVE/UPCOMING)"""
+        """Xử lý nút: 🔥 Mã siêu xịn (Hiển thị mã đã xác minh đạt chuẩn >= 70 điểm)"""
         verified_vouchers = self.voucher_repo.get_elite_verified_vouchers(limit=20)
         super_list = []
         worthy_list = []
 
         for v in verified_vouchers:
             score, label, _ = calculate_elite_score(v)
-            if score >= 90:
+            if score >= 80:
                 super_list.append((v, score))
-            elif score >= 80:
+            elif score >= 70:
                 worthy_list.append((v, score))
 
         super_list.sort(key=lambda x: x[1], reverse=True)
         worthy_list.sort(key=lambda x: x[1], reverse=True)
 
-        lines = ["💎 <b>DANH SÁCH VOUCHER ELITE ĐÃ XÁC MINH (>= 80 ĐIỂM)</b>\n"]
+        lines = ["💎 <b>DANH SÁCH VOUCHER ELITE ĐÃ XÁC MINH (>= 70 ĐIỂM)</b>\n"]
 
         if super_list:
-            lines.append("🔥 <b>SIÊU XỊN (90–100 điểm):</b>")
+            lines.append("🔥 <b>SIÊU XỊN (80–100 điểm):</b>")
             for v, sc in super_list[:5]:
                 code = v.voucher_code
+                code_badge = f"<code>{code.strip()}</code>" if code and str(code).strip() and str(code).upper() != "NONE" else "📥 <i>Bấm lưu</i>"
                 vs = v.verification_status.value if isinstance(v.verification_status, VerificationStatus) else v.verification_status
-                lines.append(f"• <code>{code}</code>: Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)}) [{sc}đ] — <i>{vs}</i>")
+                lines.append(f"• {code_badge}: Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)}) [{sc}đ] — <i>{vs}</i>")
             lines.append("")
 
         if worthy_list:
-            lines.append("✅ <b>ĐÁNG LẤY (80–89 điểm):</b>")
+            lines.append("💎 <b>ĐÁNG LẤY (70–79 điểm):</b>")
             for v, sc in worthy_list[:5]:
                 code = v.voucher_code
+                code_badge = f"<code>{code.strip()}</code>" if code and str(code).strip() and str(code).upper() != "NONE" else "📥 <i>Bấm lưu</i>"
                 vs = v.verification_status.value if isinstance(v.verification_status, VerificationStatus) else v.verification_status
-                lines.append(f"• <code>{code}</code>: Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)}) [{sc}đ] — <i>{vs}</i>")
+                lines.append(f"• {code_badge}: Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)}) [{sc}đ] — <i>{vs}</i>")
             lines.append("")
 
         if not super_list and not worthy_list:
-            lines.append("<i>Hiện tại chưa có mã nào đạt chuẩn xác minh VERIFIED_ACTIVE/UPCOMING (>= 80 điểm). Bấm '🔍 Quét ngay' để kiểm tra!</i>")
+            lines.append("<i>Hiện tại chưa có mã nào đạt chuẩn xác minh VERIFIED_ACTIVE/UPCOMING (>= 70 điểm). Bấm '🔍 Quét ngay' để kiểm tra!</i>")
 
         return "\n".join(lines), get_elite_back_keyboard()
 
@@ -115,7 +117,9 @@ class EliteCommands:
             lines.append("🔑 <b>VOUCHER ELITE SẮP MỞ (ĐÃ XÁC MINH CODE):</b>")
             for v in verified_upcoming[:5]:
                 score, _, _ = calculate_elite_score(v)
-                lines.append(f"• <code>{v.voucher_code}</code>: Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)})\n  ⏰ <i>Mở: {v.start_time}</i>")
+                code = v.voucher_code
+                code_badge = f"<code>{code.strip()}</code>" if code and str(code).strip() and str(code).upper() != "NONE" else "📥 <i>Bấm lưu</i>"
+                lines.append(f"• {code_badge}: Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)})\n  ⏰ <i>Mở: {v.start_time}</i>")
             lines.append("")
 
         if events:
@@ -152,12 +156,13 @@ class EliteCommands:
         if not tracked:
             lines.append("<i>Bạn chưa theo dõi shop nào. Hãy gửi link shop để thêm vào radar!</i>")
         elif not shop_vouchers:
-            lines.append("<i>Các shop bạn theo dõi hiện chưa có mã nào đạt chuẩn xác minh Elite (>= 80đ).</i>")
+            lines.append("<i>Các shop bạn theo dõi hiện chưa có mã nào đạt chuẩn xác minh Elite (>= 70đ).</i>")
         else:
             for v, sc in shop_vouchers[:8]:
-                code = v.voucher_code or "CHƯA LỘ"
+                code = v.voucher_code
+                code_badge = f"<code>{code.strip()}</code>" if code and str(code).strip() and str(code).upper() != "NONE" else "📥 Bấm lưu"
                 sname = v.shop_name or "Shop"
-                lines.append(f"• <b>{sname}</b>: <code>{code}</code> Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)}) [{sc}đ]")
+                lines.append(f"• <b>{sname}</b>: {code_badge} Giảm {format_discount_display(v)} (Đơn {format_currency(v.min_order_value)}) [{sc}đ]")
 
         return "\n".join(lines), get_elite_back_keyboard()
 

@@ -7,7 +7,8 @@
   "settings": {
     "min_discount_percent": 30,
     "normal_interval_seconds": 30,
-    "turbo_interval_seconds": 2,
+    "fast_lifecycle_interval": 10,
+    "deep_discovery_interval": 60,
     "focus_high_tier_vouchers": true,
     "web_port": 8000
   }

@@ -18,6 +18,27 @@ def format_scope_display(voucher: Voucher) -> str:
         return f"Ngành hàng ({cats})"
     return "Toàn sàn"
 
+def format_code_block(voucher: Voucher) -> str:
+    """Định dạng chuẩn hiển thị mã code / hình thức áp dụng (Cấm tuyệt đối render None)"""
+    code = getattr(voucher, "voucher_code", None)
+    if code and str(code).strip() and str(code).upper() != "NONE":
+        return f"<b>Mã:</b> <code>{str(code).strip()}</code> <i>(Chạm để sao chép)</i>"
+
+    raw_status = voucher.status.value if isinstance(voucher.status, VoucherStatus) else str(voucher.status)
+    ver_status = voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else str(voucher.verification_status)
+    claim_type = getattr(voucher, "claim_type", "CODE")
+
+    if raw_status == "EXHAUSTED":
+        return "<b>Trạng thái:</b> ⚠️ <i>Tạm hết lượt lưu</i>"
+    elif "UPCOMING" in raw_status or "UPCOMING" in ver_status or ver_status == "UPCOMING_UNKNOWN_CODE":
+        t_start = voucher.start_time or "giờ mở"
+        return f"<b>Mã:</b> ⏳ <b>ĐỢI LỘ MÃ ({t_start})</b>"
+    elif claim_type == "SAVE_BUTTON" or getattr(voucher, "shop_url", None) or getattr(voucher, "claim_url", None):
+        target_link = getattr(voucher, "shop_url", None) or getattr(voucher, "claim_url", None) or getattr(voucher, "source_url", None) or "https://shopee.vn"
+        return f"<b>Hình thức:</b> 📥 <b>BẤM LƯU TẠI SHOP / BANNER</b> (<a href=\"{target_link}\">Bấm lưu ngay</a>)"
+    else:
+        return "<b>Hình thức:</b> 📥 <b>BẤM LƯU TẠI SHOP / BANNER</b> <i>(Không cần nhập code)</i>"
+
 def format_verified_active_voucher(voucher: Voucher) -> Tuple[str, Optional[Dict[str, Any]]]:
     """Định dạng chuẩn: 🔥 VOUCHER ELITE ĐÃ XÁC MINH"""
     source_label = voucher.source_title or voucher.source_type
@@ -27,7 +48,7 @@ def format_verified_active_voucher(voucher: Voucher) -> Tuple[str, Optional[Dict
 
     msg = (
         "🔥 <b>VOUCHER ELITE ĐÃ XÁC MINH</b>\n\n"
-        f"<b>Mã:</b> <code>{voucher.voucher_code}</code> <i>(Chạm để sao chép)</i>\n"
+        f"{format_code_block(voucher)}\n"
         "<b>Trạng thái:</b> ✅ Đang hoạt động\n"
         f"<b>Xác minh:</b> <code>{voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else voucher.verification_status}</code>\n"
         f"<b>Nguồn:</b> {source_label}\n"
@@ -56,7 +77,7 @@ def format_verified_upcoming_voucher(voucher: Voucher) -> Tuple[str, Optional[Di
 
     msg = (
         "🔑 <b>VOUCHER ELITE SẮP MỞ</b>\n\n"
-        f"<b>Mã:</b> <code>{voucher.voucher_code}</code> <i>(Chạm để sao chép)</i>\n"
+        f"{format_code_block(voucher)}\n"
         "<b>Trạng thái:</b> ⏳ Sắp mở\n"
         f"<b>Xác minh:</b> <code>{voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else voucher.verification_status}</code>\n"
         f"<b>Nguồn:</b> {source_label}\n"
@@ -187,12 +208,11 @@ def format_scan_summary_elite(
 
 def format_elite_shop_voucher(voucher: Voucher, score: int = 90, reason: str = "") -> str:
     shop_title = voucher.shop_name or f"Shop ID {voucher.shop_id}"
-    code_str = voucher.voucher_code or "ÁP MÃ TẠI SHOP"
     reason_line = f"<b>Lý do đạt:</b> {reason}\n" if reason else ""
     return (
         "🏪 <b>MÃ SHOP SIÊU XỊN — ĐÃ THEO DÕI</b>\n\n"
         f"<b>Shop:</b> {shop_title}\n"
-        f"<b>Mã:</b> <code>{code_str}</code>\n"
+        f"{format_code_block(voucher)}\n"
         f"<b>Giảm:</b> {format_discount_display(voucher)}\n"
         f"<b>Đơn tối thiểu:</b> {format_currency(voucher.min_order_value)}\n"
         f"<b>Hiệu lực:</b> {voucher.start_time} → {voucher.end_time}\n"
@@ -202,11 +222,10 @@ def format_elite_shop_voucher(voucher: Voucher, score: int = 90, reason: str = "
     )
 
 def format_elite_upcoming_known(voucher: Voucher, score: int = 90, reason: str = "") -> str:
-    code_str = voucher.voucher_code or "Chưa công bố"
     reason_line = f"<b>Lý do đạt:</b> {reason}\n" if reason else ""
     return (
         "🔑 <b>MÃ SẮP MỞ ĐÃ LỘ CODE</b>\n\n"
-        f"<b>Mã:</b> <code>{code_str}</code>\n"
+        f"{format_code_block(voucher)}\n"
         f"<b>Giảm:</b> {format_discount_display(voucher)}\n"
         f"<b>Đơn tối thiểu:</b> {format_currency(voucher.min_order_value)}\n"
         f"<b>Phạm vi:</b> {format_scope_display(voucher)}\n"
@@ -218,10 +237,9 @@ def format_elite_upcoming_known(voucher: Voucher, score: int = 90, reason: str =
     )
 
 def format_elite_code_revealed(voucher: Voucher, score: int = 90) -> str:
-    code_str = voucher.voucher_code or "Chưa rõ"
     return (
         "🔑 <b>MÃ SẮP MỞ ĐÃ LỘ CODE</b>\n\n"
-        f"<b>Mã:</b> <code>{code_str}</code>\n"
+        f"{format_code_block(voucher)}\n"
         f"<b>Giảm:</b> {format_discount_display(voucher)}\n"
         f"<b>Đơn tối thiểu:</b> {format_currency(voucher.min_order_value)}\n"
         f"<b>Phạm vi:</b> {format_scope_display(voucher)}\n"

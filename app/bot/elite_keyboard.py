@@ -26,18 +26,15 @@ def get_elite_voucher_action_keyboard(
     source_url: str = "https://shopee.vn",
     shop_url: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Bàn phím tương tác voucher theo chuẩn mẫu Section 10"""
-    buttons = []
-    if shop_url:
-        buttons.append([
-            {"text": "🏪 Mở shop", "url": shop_url},
-            {"text": "🌐 Mở nguồn", "url": source_url or "https://shopee.vn"}
-        ])
-    else:
-        buttons.append([
-            {"text": "🌐 Mở nguồn", "url": source_url or "https://shopee.vn"},
-            {"text": "🔄 Quét lại", "callback_data": "action:elite_scan_now"}
-        ])
+    """Bàn phím tương tác voucher luôn có 2 link: 🏪 Mở shop / Lưu + 🌐 Mở nguồn"""
+    target_shop = shop_url or source_url or "https://shopee.vn"
+    target_source = source_url or "https://shopee.vn"
+    buttons = [
+        [
+            {"text": "🏪 Mở shop / Lưu", "url": target_shop},
+            {"text": "🌐 Mở nguồn", "url": target_source}
+        ]
+    ]
     return {"inline_keyboard": buttons}
 
 def get_elite_back_keyboard() -> Dict[str, Any]:

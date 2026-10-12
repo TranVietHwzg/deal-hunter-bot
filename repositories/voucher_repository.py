@@ -458,26 +458,28 @@ class VoucherRepository(BaseRepository):
             rows = cur.execute(sql, tuple(params)).fetchall()
             return [self._row_to_voucher(dict(r)) for r in rows]
 
-    def get_upcoming_vouchers(self, days: int = 7) -> List[Voucher]:
-        """Lấy các voucher sắp mở trong N ngày tới"""
+    def get_upcoming_vouchers(self, days: int = 7, limit: int = 200) -> List[Voucher]:
+        """Lấy các voucher sắp mở trong N ngày tới (giới hạn LIMIT để tối ưu RAM 512MB)"""
         with self.transaction() as cur:
             rows = cur.execute("""
             SELECT * FROM vouchers 
             WHERE is_freeship = 0 
               AND status IN ('UPCOMING_CODE_KNOWN', 'UPCOMING_UNKNOWN_CODE')
             ORDER BY start_time ASC, discount_value DESC
-            """).fetchall()
+            LIMIT ?
+            """, (limit,)).fetchall()
             return [self._row_to_voucher(dict(r)) for r in rows]
 
-    def get_active_vouchers(self) -> List[Voucher]:
-        """Lấy các voucher đang ACTIVE"""
+    def get_active_vouchers(self, limit: int = 200) -> List[Voucher]:
+        """Lấy các voucher đang ACTIVE (giới hạn LIMIT để tối ưu RAM 512MB)"""
         with self.transaction() as cur:
             rows = cur.execute("""
             SELECT * FROM vouchers 
             WHERE is_freeship = 0 
               AND status = 'ACTIVE'
             ORDER BY discount_value DESC
-            """).fetchall()
+            LIMIT ?
+            """, (limit,)).fetchall()
             return [self._row_to_voucher(dict(r)) for r in rows]
 
     def get_all_vouchers(self, limit: int = 100) -> List[Voucher]:
@@ -732,4 +734,69 @@ class VoucherRepository(BaseRepository):
                     return self._row_to_voucher(dict(row))
 
         return None
+
+    def cleanup_old_records(self) -> Dict[str, int]:
+        """Dọn dẹp bản ghi cũ để tối ưu RAM và dung lượng đĩa cho Render Free (512MB):
+        - Xóa voucher EXPIRED/CANCELLED quá 7 ngày
+        - Giữ tối đa 2.000 observations mới nhất
+        - Giữ tối đa 500 source_runs mới nhất
+        - Giữ tối đa 1.000 voucher_changes mới nhất
+        - Chạy incremental_vacuum / VACUUM
+        """
+        deleted_counts = {}
+        with self.transaction() as cur:
+            # 1. Xóa voucher EXPIRED hoặc CANCELLED quá 7 ngày
+            cur.execute("""
+            DELETE FROM vouchers 
+            WHERE status IN ('EXPIRED', 'CANCELLED') 
+              AND (
+                  (updated_at IS NOT NULL AND updated_at < datetime('now', '-7 days'))
+                  OR (end_time IS NOT NULL AND end_time < datetime('now', '-7 days'))
+              );
+            """)
+            deleted_counts["expired_vouchers"] = cur.rowcount
+
+            # 2. Giữ tối đa 2.000 observations mới nhất
+            cur.execute("""
+            DELETE FROM voucher_observations 
+            WHERE id NOT IN (
+                SELECT id FROM voucher_observations 
+                ORDER BY observed_at DESC 
+                LIMIT 2000
+            );
+            """)
+            deleted_counts["pruned_observations"] = cur.rowcount
+
+            # 3. Giữ tối đa 500 source_runs mới nhất
+            cur.execute("""
+            DELETE FROM source_runs 
+            WHERE id NOT IN (
+                SELECT id FROM source_runs 
+                ORDER BY started_at DESC 
+                LIMIT 500
+            );
+            """)
+            deleted_counts["pruned_source_runs"] = cur.rowcount
+
+            # 4. Giữ tối đa 1.000 voucher_changes mới nhất
+            cur.execute("""
+            DELETE FROM voucher_changes 
+            WHERE id NOT IN (
+                SELECT id FROM voucher_changes 
+                ORDER BY detected_at DESC 
+                LIMIT 1000
+            );
+            """)
+            deleted_counts["pruned_changes"] = cur.rowcount
+
+        try:
+            conn = self.get_connection()
+            conn.isolation_level = None
+            conn.execute("PRAGMA incremental_vacuum;")
+            conn.close()
+        except Exception:
+            pass
+
+        return deleted_counts
+
 

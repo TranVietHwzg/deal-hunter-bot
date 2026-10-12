@@ -39,6 +39,7 @@ class TelegramBotService:
         self.api_url = f"https://api.telegram.org/bot{self.token}"
         self.is_running = False
         self.last_update_id = 0
+        self._http_client: Optional[httpx.AsyncClient] = None
 
         # Khởi tạo các tầng repository & services
         self.voucher_repo = VoucherRepository()
@@ -46,8 +47,8 @@ class TelegramBotService:
         self.scan_repo = ScanRepository()
         self.dedupe_service = DedupeService(self.scan_repo)
         self.discovery_service = DiscoveryService(self.voucher_repo, self.scan_repo)
-        self.orchestrator = DiscoveryOrchestrator(self.voucher_repo, self.scan_repo, self.dedupe_service)
-        self.lifecycle_service = LifecycleService(self.voucher_repo, self.scan_repo, self.dedupe_service)
+        self.orchestrator = DiscoveryOrchestrator(self.voucher_repo, self.shop_repo, self.scan_repo)
+        self.lifecycle_service = LifecycleService(self.voucher_repo, self.scan_repo, self.dedupe_service, self.shop_repo)
         self.scan_controls = ScanControls(self.voucher_repo, self.shop_repo, self.discovery_service, orchestrator=self.orchestrator)
 
         # Khởi tạo tầng Elite Radar
@@ -58,6 +59,17 @@ class TelegramBotService:
         # Trạng thái chờ người dùng nhập link shop
         self.awaiting_shop_link_users = set()
         self.pending_price_input: Dict[str, Dict[str, Any]] = {}
+
+    def get_http_client(self) -> httpx.AsyncClient:
+        """Tái sử dụng 1 httpx.AsyncClient duy nhất để tránh leak socket & tiết kiệm RAM 512MB trên Render"""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(timeout=35.0)
+        return self._http_client
+
+    async def close(self) -> None:
+        """Đóng kết nối HTTP an toàn khi tắt bot"""
+        if self._http_client and not self._http_client.is_closed:
+            await self._http_client.aclose()
 
     def get_main_menu_keyboard(self) -> Dict[str, Any]:
         """Bàn phím chính 5 nút chuẩn Elite Radar"""
@@ -203,21 +215,21 @@ class TelegramBotService:
         if reply_markup:
             payload["reply_markup"] = reply_markup
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                res = await client.post(f"{self.api_url}/sendMessage", json=payload)
-                return res.json()
-            except Exception as e:
-                print(f"[Telegram] Lỗi gửi tin nhắn: {e}")
-                return None
+        client = self.get_http_client()
+        try:
+            res = await client.post(f"{self.api_url}/sendMessage", json=payload)
+            return res.json()
+        except Exception as e:
+            print(f"[Telegram] Lỗi gửi tin nhắn: {e}")
+            return None
 
     async def answer_callback(self, callback_query_id: str, text: Optional[str] = None) -> None:
         try:
             payload = {"callback_query_id": callback_query_id}
             if text:
                 payload["text"] = text
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                await client.post(f"{self.api_url}/answerCallbackQuery", json=payload)
+            client = self.get_http_client()
+            await client.post(f"{self.api_url}/answerCallbackQuery", json=payload)
         except Exception:
             pass
 
@@ -236,7 +248,7 @@ class TelegramBotService:
         if self.dedupe_service.is_duplicate(fp):
             return False
 
-        markup = get_voucher_action_keyboard(voucher.source_url)
+        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -256,7 +268,7 @@ class TelegramBotService:
             return False
 
         text = format_active_voucher(voucher)
-        markup = get_voucher_action_keyboard(voucher.source_url)
+        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -276,7 +288,7 @@ class TelegramBotService:
             return False
 
         text = format_countdown_reminder(voucher, reminder_type)
-        markup = get_voucher_action_keyboard(voucher.source_url)
+        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -307,7 +319,7 @@ class TelegramBotService:
             return False
 
         text = format_code_revealed(voucher)
-        markup = get_voucher_action_keyboard(voucher.source_url)
+        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -524,22 +536,22 @@ class TelegramBotService:
         self.is_running = True
         print(f"[Telegram Radar] Đã kết nối bot token {self.token[:8]}***. Bắt đầu polling...")
 
-        async with httpx.AsyncClient(timeout=35.0) as client:
-            while self.is_running:
-                try:
-                    params = {
-                        "offset": self.last_update_id + 1,
-                        "timeout": 20
-                    }
-                    res = await client.get(f"{self.api_url}/getUpdates", params=params)
-                    if res.status_code == 200:
-                        data = res.json()
-                        for update in data.get("result", []):
-                            self.last_update_id = update["update_id"]
-                            if "callback_query" in update:
-                                await self.handle_callback_query(update["callback_query"])
-                            elif "message" in update:
-                                await self.handle_message(update["message"])
-                    await asyncio.sleep(0.5)
-                except Exception as e:
-                    await asyncio.sleep(3.0)
+        client = self.get_http_client()
+        while self.is_running:
+            try:
+                params = {
+                    "offset": self.last_update_id + 1,
+                    "timeout": 20
+                }
+                res = await client.get(f"{self.api_url}/getUpdates", params=params)
+                if res.status_code == 200:
+                    data = res.json()
+                    for update in data.get("result", []):
+                        self.last_update_id = update["update_id"]
+                        if "callback_query" in update:
+                            await self.handle_callback_query(update["callback_query"])
+                        elif "message" in update:
+                            await self.handle_message(update["message"])
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                await asyncio.sleep(3.0)

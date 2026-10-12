@@ -42,24 +42,25 @@ class EliteNotificationService:
             return False
 
         # Định dạng nội dung theo mẫu Section 10
+        shop_target_url = getattr(voucher, "shop_url", None)
         if event_type == "CODE_REVEALED":
             text = format_elite_code_revealed(voucher, score=score)
-            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url)
+            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url, shop_url=shop_target_url)
         elif voucher.scope_type == ScopeType.SHOP:
             text = format_elite_shop_voucher(voucher, score=score, reason=reason)
-            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url, shop_url=voucher.shop_url)
+            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url, shop_url=shop_target_url)
         elif event_type in ("UPCOMING_UNKNOWN", "WATCH"):
             text, t_markup = format_upcoming_unknown_event(voucher)
-            markup = t_markup or get_elite_voucher_action_keyboard(source_url=voucher.source_url)
+            markup = t_markup or get_elite_voucher_action_keyboard(source_url=voucher.source_url, shop_url=shop_target_url)
         elif event_type in ("UPCOMING_KNOWN", "UPCOMING"):
             text = format_elite_upcoming_known(voucher, score=score, reason=reason)
-            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url)
+            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url, shop_url=shop_target_url)
         else:
             # Voucher ACTIVE
-            code_str = voucher.voucher_code or "ÁP MÃ TRỰC TIẾP"
+            from app.bot.elite_templates import format_code_block
             text = (
                 "🔥 <b>MÃ SHOPEE SIÊU XỊN — ĐANG HOẠT ĐỘNG</b>\n\n"
-                f"<b>Mã:</b> <code>{code_str}</code>\n"
+                f"{format_code_block(voucher)}\n"
                 f"<b>Giảm:</b> {format_discount_display(voucher)}\n"
                 f"<b>Đơn tối thiểu:</b> {format_currency(voucher.min_order_value)}\n"
                 f"<b>Phạm vi:</b> {format_scope_display(voucher)}\n"
@@ -67,7 +68,7 @@ class EliteNotificationService:
                 f"<b>Điểm Elite:</b> {score}/100\n"
                 "👉 <i>Nhập mã ngay tại giỏ hàng kẻo hết lượt!</i>\n"
             )
-            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url)
+            markup = get_elite_voucher_action_keyboard(source_url=voucher.source_url, shop_url=shop_target_url)
 
         if self.bot and hasattr(self.bot, "send_message"):
             await self.bot.send_message(text, reply_markup=markup)

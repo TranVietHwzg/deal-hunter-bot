@@ -81,13 +81,18 @@ async def run_lifecycle_step(bot_instance=None):
     """Kiểm tra nhẹ vòng đời và gửi nhắc nhở (tiêu tốn < 1ms, 0 MB RAM)"""
     lifecycle_notifs = lifecycle_service.run_lifecycle_cycle()
     if bot_instance:
+        notifier = getattr(bot_instance, "elite_notifier", None)
         for item in lifecycle_notifs:
             itype = item.get("type")
             v = item.get("voucher")
+            score = item.get("score", 70)
             if not v:
                 continue
             if itype == "VOUCHER_OPENED":
-                await bot_instance.broadcast_active_voucher(v)
+                if notifier:
+                    await notifier.notify_elite_voucher(v, "ACTIVE_NOW", score=score)
+                else:
+                    await bot_instance.broadcast_active_voucher(v)
             elif itype in ("REMINDER_24H", "REMINDER_15M", "REMINDER_2M"):
                 await bot_instance.broadcast_reminder(v, itype)
     return lifecycle_notifs
@@ -141,12 +146,19 @@ async def background_radar_loop(bot_instance=None, config=None):
     Vòng lặp chạy nền của Radar tối ưu hóa bộ nhớ cho Render 512MB:
     - Fast loop (5s - 15s): Kiểm tra chính xác giờ mở mã (Lifecycle & Reminder) tốn 0MB RAM.
     - Deep discovery loop (30s - 60s): Quét đa nguồn thu thập deal mới, dọn RAM ngay sau mỗi lượt (gc.collect()).
+    - Periodic DB Pruning: Dọn dẹp voucher hết hạn và hạn chế bảng observations.
     """
     import gc
     import time
 
     print("[Radar Scheduler] Khởi động tiến trình theo dõi mã sắp mở Shopee 24/7 (Memory Safe)...")
     last_deep_scan = 0
+    last_cleanup = time.time()
+
+    try:
+        voucher_repo.cleanup_old_records()
+    except Exception as e:
+        print(f"[Radar Scheduler] Dọn dẹp DB ban đầu: {e}")
 
     while True:
         try:
@@ -157,7 +169,15 @@ async def background_radar_loop(bot_instance=None, config=None):
             # 1. Luôn chạy kiểm tra vòng đời & nhắc nhở (rất nhẹ, không tốn RAM)
             await run_lifecycle_step(bot_instance)
 
-            # 2. Chu kỳ cào sâu toàn mạng (Deep Discovery):
+            # 2. Định kỳ dọn dẹp DB mỗi 6 giờ
+            if now_ts - last_cleanup >= 21600:
+                last_cleanup = now_ts
+                try:
+                    voucher_repo.cleanup_old_records()
+                except Exception as e:
+                    print(f"[Radar Scheduler] Dọn dẹp DB định kỳ: {e}")
+
+            # 3. Chu kỳ cào sâu toàn mạng (Deep Discovery):
             # Trong khung giờ vàng cào 30s/lần; thời gian thường cào 60s/lần
             deep_interval = 30 if turbo else 60
             if now_ts - last_deep_scan >= deep_interval:

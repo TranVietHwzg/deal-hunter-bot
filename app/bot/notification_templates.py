@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional, List
 from models.voucher import Voucher, ScopeType, DiscountType, VoucherStatus
+from app.bot.elite_templates import format_code_block
 
 def format_currency(val: float) -> str:
     """Định dạng tiền tệ đẹp: 100.000đ"""
@@ -54,7 +55,7 @@ def format_upcoming_known_code(voucher: Voucher) -> str:
         "🔑 <b>MÃ SHOPEE SẮP MỞ</b>\n\n"
         f"{format_super_badge(voucher)}"
         f"<b>Phạm vi:</b> {scope_str}\n"
-        f"<b>Mã:</b> <code>{voucher.voucher_code}</code>\n"
+        f"{format_code_block(voucher)}\n"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"
         f"<b>Hiệu lực:</b> {voucher.start_time} ➔ {voucher.end_time}\n"
@@ -90,7 +91,7 @@ def format_active_voucher(voucher: Voucher) -> str:
     msg = (
         "🔥 <b>MÃ SHOPEE ĐÃ MỞ — NHẬP MÃ NGAY</b>\n\n"
         f"{format_super_badge(voucher)}"
-        f"<b>Mã:</b> <code>{voucher.voucher_code}</code>\n"
+        f"{format_code_block(voucher)}\n"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"
         f"<b>Hết hạn:</b> {voucher.end_time}\n"
@@ -117,7 +118,7 @@ def format_countdown_reminder(voucher: Voucher, reminder_type: str) -> str:
     msg = (
         f"⏰ <b>NHẮC NHỞ: CÒN {time_badge} NỮA MỞ MÃ!</b>\n\n"
         f"{format_super_badge(voucher)}"
-        f"<b>Mã:</b> <code>{voucher.voucher_code}</code>\n"
+        f"{format_code_block(voucher)}\n"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"
         f"<b>Giờ mở:</b> {voucher.start_time}\n"
@@ -134,7 +135,7 @@ def format_code_revealed(voucher: Voucher) -> str:
 
     msg = (
         "🎉 <b>ĐÃ CÔNG BỐ MÃ: SỰ KIỆN SHOPEE</b>\n\n"
-        f"<b>Mã chính thức:</b> <code>{voucher.voucher_code}</code>\n"
+        f"{format_code_block(voucher)}\n"
         f"<b>Phạm vi:</b> {scope_str}\n"
         f"<b>Giảm:</b> {discount_str}\n"
         f"<b>Đơn tối thiểu:</b> {min_spend_str}\n"

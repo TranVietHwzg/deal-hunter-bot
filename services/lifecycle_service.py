@@ -67,14 +67,13 @@ class LifecycleService:
 
         notifications_to_send: List[Dict[str, Any]] = []
 
-        # Ưu tiên lấy toàn bộ UPCOMING (để không bỏ lỡ lịch nhắc 24h/15m/2m), kết hợp ACTIVE và EXHAUSTED
-        upcoming_vouchers = self.voucher_repo.get_upcoming_vouchers(days=7)
-        active_vouchers = self.voucher_repo.get_active_vouchers()
-        exhausted_vouchers = self.voucher_repo.get_vouchers(status=VoucherStatus.EXHAUSTED, limit=200)
-        other_vouchers = self.voucher_repo.get_vouchers(limit=300)
+        # Ưu tiên lấy UPCOMING (limit 200), kết hợp ACTIVE (limit 200) và EXHAUSTED (limit 50)
+        upcoming_vouchers = self.voucher_repo.get_upcoming_vouchers(days=7, limit=200)
+        active_vouchers = self.voucher_repo.get_active_vouchers(limit=200)
+        exhausted_vouchers = self.voucher_repo.get_vouchers(status=VoucherStatus.EXHAUSTED, limit=50)
         seen_ids = set()
         all_vouchers = []
-        for v in upcoming_vouchers + active_vouchers + exhausted_vouchers + other_vouchers:
+        for v in upcoming_vouchers + active_vouchers + exhausted_vouchers:
             if v.id not in seen_ids:
                 seen_ids.add(v.id)
                 all_vouchers.append(v)
@@ -90,6 +89,12 @@ class LifecycleService:
                 pass
 
         for v in all_vouchers:
+            is_tracked = False
+            if v.shop_id and str(v.shop_id).lower() in tracked_shop_ids:
+                is_tracked = True
+            elif v.shop_name and str(v.shop_name).lower() in tracked_shop_ids:
+                is_tracked = True
+
             # 1. Kiểm tra chuyển trạng thái thời gian thực
             new_status, event_name = evaluate_lifecycle_transition(v)
             if new_status:
@@ -98,21 +103,19 @@ class LifecycleService:
 
                 # Chỉ gửi thông báo khi mã mở (VOUCHER_OPENED), không gửi spam khi EXPIRED
                 if event_name == "VOUCHER_OPENED" and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
-                    fp = self.dedupe_service.calculate_fingerprint(v, "VOUCHER_OPENED")
-                    if not self.dedupe_service.is_duplicate(fp):
-                        notifications_to_send.append({
-                            "type": "VOUCHER_OPENED",
-                            "voucher": v,
-                            "fingerprint": fp
-                        })
+                    score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
+                    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 65)
+                    if score >= min_notify:
+                        fp = self.dedupe_service.calculate_fingerprint(v, "VOUCHER_OPENED")
+                        if not self.dedupe_service.is_duplicate(fp):
+                            notifications_to_send.append({
+                                "type": "VOUCHER_OPENED",
+                                "voucher": v,
+                                "fingerprint": fp,
+                                "score": score
+                            })
 
             # 2. Kiểm tra nhắc nhở hẹn giờ (T-24h, T-15m, T-2m) kèm elite_score
-            is_tracked = False
-            if v.shop_id and str(v.shop_id).lower() in tracked_shop_ids:
-                is_tracked = True
-            elif v.shop_name and str(v.shop_name).lower() in tracked_shop_ids:
-                is_tracked = True
-
             score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
             reminder_type = check_upcoming_reminder(v, elite_score=score)
             if reminder_type and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
