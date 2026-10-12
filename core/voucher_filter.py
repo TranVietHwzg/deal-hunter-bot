@@ -66,9 +66,31 @@ def is_worthy_voucher(
         return dval >= min_fixed_discount
     elif dtype in ("PERCENT", "PERCENTAGE"):
         is_high_rate = (dval >= min_percent_rate) and (max_d >= min_percent_cap)
-        is_big_cap = (max_d >= 100000.0) and (dval >= 10.0)
+        is_big_cap = (max_d >= 100000.0) and (dval >= 30.0)
         return is_high_rate or is_big_cap
 
+    return False
+
+
+def is_worthy_notify(
+    voucher: Voucher or Dict[str, Any],
+    min_fixed_discount: Optional[float] = None,
+    min_percent_rate: Optional[float] = None,
+    min_percent_cap: Optional[float] = None
+) -> bool:
+    """Tiêu chuẩn voucher xịn đáng phát cảnh báo (Single Source of Truth: >= 30k hoặc >= 30% trần >= 30k)"""
+    return is_worthy_voucher(voucher, min_fixed_discount, min_percent_rate, min_percent_cap)
+
+
+def is_worthy_watch(
+    voucher: Voucher or Dict[str, Any]
+) -> bool:
+    """Tiêu chuẩn voucher đáng lưu theo dõi nhưng không spam thông báo"""
+    if is_worthy_voucher(voucher):
+        return True
+    dtype, dval, max_d, _ = _get_numbers(voucher)
+    if dtype in ("PERCENT", "PERCENTAGE"):
+        return dval >= 15.0 and max_d >= 100000.0
     return False
 
 

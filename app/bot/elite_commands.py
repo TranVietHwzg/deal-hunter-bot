@@ -267,7 +267,8 @@ class EliteCommands:
         stats = {
             "cookie_enabled": cookie_enabled,
             "tracked_count": len(tracked),
-            "sources": health_summary
+            "sources": health_summary,
+            "personal_status": "CONNECTED" if getattr(getattr(self.discovery_service, "personal_source", None), "is_connected", False) else "NOT_CONNECTED (0)"
         }
         return format_coverage_report(stats, tracked_count=len(tracked))
 

@@ -48,7 +48,7 @@ class EliteDiscoveryService:
     async def run_elite_scan(
         self,
         scan_mode: ScanMode = ScanMode.AUTO,
-        min_elite_score: int = 70
+        min_elite_score: int = 65
     ) -> Dict[str, Any]:
         scan_id = f"SCAN_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         self.scan_repo.start_scan_run(scan_id, scan_mode, "elite_radar_sources")
@@ -289,7 +289,8 @@ class EliteDiscoveryService:
             "cookie_enabled": cookie_active,
             "tracked_shops_count": len(tracked_shop_ids),
             "sources_scanned": sources_scanned,
-            "errors_count": len(errors)
+            "errors_count": len(errors),
+            "personal_status": "CONNECTED" if getattr(self.personal_source, "is_connected", False) else "NOT_CONNECTED (0)"
         }
 
         return {

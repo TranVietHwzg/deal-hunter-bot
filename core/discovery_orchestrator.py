@@ -60,8 +60,13 @@ class DiscoveryOrchestrator:
         canonical_updated = 0
         events_to_notify: List[Dict[str, Any]] = []
 
-        # 1. Thu thập song song từ các nguồn (có rate limiter riêng của từng nguồn)
-        tasks = [source.collect_with_metrics() for source in self.sources]
+        # 1. Thu thập từ các nguồn (giới hạn tối đa 2 nguồn cùng lúc để giữ RAM < 150MB trên Render)
+        sem = asyncio.Semaphore(2)
+        async def fetch_with_sem(src):
+            async with sem:
+                return await src.collect_with_metrics()
+
+        tasks = [fetch_with_sem(source) for source in self.sources]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # 2. Xử lý từng nguồn và ghi nhận metrics
@@ -141,6 +146,9 @@ class DiscoveryOrchestrator:
             source_runs.append(source_run)
 
         finished_time = datetime.now(timezone.utc)
+        import gc
+        gc.collect()
+
         return {
             "started_at": start_time.isoformat(),
             "finished_at": finished_time.isoformat(),

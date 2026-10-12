@@ -63,7 +63,7 @@ def calculate_elite_score(
     elif real_saving >= 50000.0:
         score_saving = 18
     elif real_saving >= 30000.0:
-        score_saving = 10
+        score_saving = 14
     else:
         score_saving = 0
 
@@ -82,6 +82,8 @@ def calculate_elite_score(
         score_rate = 15
     elif discount_rate >= 30.0:
         score_rate = 10
+        if (max_d or 0) >= 100000.0:
+            score_rate += 2
     elif real_saving >= 100000.0 and discount_rate >= 15.0:
         # Mã to giảm >= 100k tiền mặt, tỷ lệ từ 15% - 29% vẫn là deal rất giá trị
         score_rate = 10
@@ -94,7 +96,9 @@ def calculate_elite_score(
     else:
         base_divisor = dval if dtype in ("FIXED", "FIXED_AMOUNT") else (max_d or 50000.0)
         ratio = min_o / base_divisor if base_divisor > 0 else 999.0
-        if ratio <= 2.0:
+        if ratio <= 1.0:
+            score_min_order = 18
+        elif ratio <= 2.0:
             score_min_order = 16
         elif ratio <= 3.0:
             score_min_order = 14 if real_saving >= 100000.0 else 12
@@ -117,6 +121,8 @@ def calculate_elite_score(
 
     if scope == "PLATFORM" or "PLATFORM" in scope:
         score_scope = 10
+    elif scope in ("PAYMENT", "PAYMENT_PARTNER") or "PAY" in scope:
+        score_scope = 7
     elif scope == "CATEGORY" or "CAT" in scope or "LIVE" in scope:
         score_scope = 7
     elif scope == "SHOP" or shop_id:
@@ -183,7 +189,7 @@ def calculate_elite_score(
 
     if total_score >= 80:
         label = "🔥 SIÊU XỊN"
-    elif total_score >= 70:
+    elif total_score >= 65:
         label = "💎 ĐÁNG LẤY"
     else:
         label = "Không đủ chuẩn"

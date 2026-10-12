@@ -4,9 +4,11 @@ from models.voucher import Voucher, VoucherStatus
 from models.notification import NotificationEvent, NotificationEventType
 from repositories.voucher_repository import VoucherRepository
 from repositories.scan_repository import ScanRepository
+from repositories.shop_repository import ShopRepository
 from core.voucher_lifecycle import evaluate_lifecycle_transition, check_upcoming_reminder
 from core.voucher_filter import is_worthy_voucher
 from core.elite_voucher_filter import classify_voucher_quality
+from core.elite_score_calculator import calculate_elite_score
 from services.dedupe_service import DedupeService
 from config.settings import settings
 
@@ -15,10 +17,12 @@ class LifecycleService:
         self,
         voucher_repo: Optional[VoucherRepository] = None,
         scan_repo: Optional[ScanRepository] = None,
-        dedupe_service: Optional[DedupeService] = None
+        dedupe_service: Optional[DedupeService] = None,
+        shop_repo: Optional[ShopRepository] = None
     ):
         self.voucher_repo = voucher_repo or VoucherRepository()
         self.scan_repo = scan_repo or ScanRepository()
+        self.shop_repo = shop_repo or ShopRepository()
         self.dedupe_service = dedupe_service or DedupeService(self.scan_repo)
 
     def _is_qualified(
@@ -74,6 +78,17 @@ class LifecycleService:
             if v.id not in seen_ids:
                 seen_ids.add(v.id)
                 all_vouchers.append(v)
+        # Lấy danh sách shop đang được theo dõi
+        tracked_shop_ids = set()
+        if self.shop_repo:
+            try:
+                for s in self.shop_repo.get_tracked_shops(enabled_only=True):
+                    tracked_shop_ids.add(str(s.shop_id).lower())
+                    if s.shop_name:
+                        tracked_shop_ids.add(str(s.shop_name).lower())
+            except Exception:
+                pass
+
         for v in all_vouchers:
             # 1. Kiểm tra chuyển trạng thái thời gian thực
             new_status, event_name = evaluate_lifecycle_transition(v)
@@ -91,15 +106,23 @@ class LifecycleService:
                             "fingerprint": fp
                         })
 
-            # 2. Kiểm tra nhắc nhở hẹn giờ (T-15m, T-2m)
-            reminder_type = check_upcoming_reminder(v)
+            # 2. Kiểm tra nhắc nhở hẹn giờ (T-24h, T-15m, T-2m) kèm elite_score
+            is_tracked = False
+            if v.shop_id and str(v.shop_id).lower() in tracked_shop_ids:
+                is_tracked = True
+            elif v.shop_name and str(v.shop_name).lower() in tracked_shop_ids:
+                is_tracked = True
+
+            score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
+            reminder_type = check_upcoming_reminder(v, elite_score=score)
             if reminder_type and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
                 fp = self.dedupe_service.calculate_fingerprint(v, reminder_type)
                 if not self.dedupe_service.is_duplicate(fp):
                     notifications_to_send.append({
                         "type": reminder_type,
                         "voucher": v,
-                        "fingerprint": fp
+                        "fingerprint": fp,
+                        "score": score
                     })
 
         return notifications_to_send

@@ -39,10 +39,11 @@ async def main():
     # 2. Khởi tạo Telegram Bot Service
     bot_instance = TelegramBotService(token=token, chat_id=chat_id)
 
-    # 3. Nạp và quét chu kỳ khởi động ban đầu
-    print("\n• Đang kiểm tra các chiến dịch và mã Shopee công khai ban đầu...")
+    # 3. Nạp kho quan sát khởi động ban đầu (Tránh double scan gây spike RAM trên Render)
+    print("\n• Đang khởi tạo kho chiến dịch và voucher Shopee...")
     await scanner.seed_default_vouchers()
-    await scanner.run_radar_cycle(bot_instance)
+    import gc
+    gc.collect()
 
     # 4. Cấu hình Uvicorn Web Server cho Render (host 0.0.0.0, port lấy từ $PORT)
     web_config = uvicorn.Config(app=app, host="0.0.0.0", port=port, log_level="warning")

@@ -241,10 +241,12 @@ def format_coverage_report(stats: Dict[str, Any], tracked_count: int = 0) -> str
             source_lines.append(f"  • {icon} <b>{sname}:</b> {st}")
     sources_block = ("\n" + "\n".join(source_lines)) if source_lines else ""
 
+    personal_st = stats.get("personal_status", "NOT_CONNECTED (0)")
     return (
         "📡 <b>BÁO CÁO ĐỘ BAO PHỦ DỮ LIỆU (ANTI-MISS RADAR)</b>\n"
         "────────────────────\n"
         f"• <b>Shopee Session Cookie:</b> {cookie_status}\n"
+        f"• <b>Ví voucher cá nhân:</b> ℹ️ {personal_st} (An toàn 100% - Read-only)\n"
         f"• <b>Hub cộng đồng & RSC:</b> ✅ Hoạt động (bloggiamgia.vn)\n"
         f"• <b>Gian hàng theo dõi (/shops):</b> {tracked_count} shop đang quét\n"
         f"• <b>Chiến dịch toàn sàn:</b> ✅ Đang theo dõi"

@@ -59,10 +59,10 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
                         code = v.get("voucher_code") or v.get("code")
                         raw_v_id = v.get("voucher_id") or v.get("promotionid")
                         claim_type = "CODE" if code else "SAVE_BUTTON"
-                        d_val = float(v.get("discount_value") or v.get("amount") or v.get("coin_percentage") or 0)
+                        d_val = float(v.get("discount_value") or v.get("amount") or v.get("discount_percentage") or v.get("discount_percent") or 0)
                         max_d = float(v.get("max_discount") or v.get("discount_cap") or d_val)
                         min_sp = float(v.get("min_spend") or v.get("min_order_value") or 0)
-                        is_pct = bool(v.get("discount_percentage") or v.get("coin_percentage") or d_val <= 100)
+                        is_pct = bool(v.get("discount_percentage") or v.get("discount_percent") or v.get("is_percent"))
                         
                         start_ts = v.get("start_time")
                         end_ts = v.get("end_time")

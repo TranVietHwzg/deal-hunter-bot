@@ -367,7 +367,7 @@ def test_17_personal_wallet_connected_adds_score_not_lower_threshold():
         source_type=""
     )
     import asyncio
-    res = asyncio.run(notifier.notify_elite_voucher(low_v, "ACTIVE_NEW", score=69))
+    res = asyncio.run(notifier.notify_elite_voucher(low_v, "ACTIVE_NEW", score=60))
     assert res is False
 
 # 18. Nút “Quét ngay” chỉ trả về voucher Elite mới/cập nhật
@@ -437,9 +437,9 @@ def test_20_platform_30k_0d_score_72_and_notified():
             "is_freeship": 0
         }
         score, label, breakdown = calculate_elite_score(v)
-        # 30k đơn 0đ đạt 74 điểm (>= ngưỡng 70 điểm để phát thông báo)
+        # 30k đơn 0đ đạt 78 điểm (saving 14 + rate 20 + min 20 + scope 10 + trust 11 + urgency 3)
         assert score >= 70
-        assert score == 74
+        assert score == 78
         assert "ĐÁNG LẤY" in label
 
         v_obj = Voucher(
@@ -461,7 +461,7 @@ def test_20_platform_30k_0d_score_72_and_notified():
         assert sent is True
         assert len(bot.sent_messages) == 1
         assert "PLAT30K" in bot.sent_messages[0]["text"]
-        assert "74/100" in bot.sent_messages[0]["text"]
+        assert f"{score}/100" in bot.sent_messages[0]["text"]
 
     import asyncio
     asyncio.run(_test())
@@ -621,15 +621,119 @@ def test_27_big_voucher_scores_and_notification():
     import asyncio
     asyncio.run(_test())
 
-# 28. Turbo Scanner: Tự động kích hoạt 2s trước khung giờ vàng 0H/12H/20H (cách 10m) và 30s thời gian khác
+# 28. Turbo Scanner: Tự động kích hoạt Turbo trước khung giờ vàng 0H/12H/20H (cách 10m) và Normal thời gian khác
 def test_28_scanner_turbo_mode():
     from core.scanner import is_turbo_active, calculate_adaptive_interval
-    # Thời điểm 11:50 (cách 12:00 10 phút) -> TURBO (2s)
+    # Thời điểm 11:50 (cách 12:00 10 phút) -> TURBO
     t_turbo = datetime(2026, 10, 12, 11, 50, 0, tzinfo=VN_TZ)
     assert is_turbo_active(t_turbo) is True
-    assert calculate_adaptive_interval(t_turbo) == 2
+    assert calculate_adaptive_interval(t_turbo) <= 5
 
-    # Thời điểm 14:30 (không gần giờ vàng, không có mã sắp mở) -> NORMAL (30s)
+    # Thời điểm 14:30 (không gần giờ vàng, không có mã sắp mở) -> NORMAL
     t_normal = datetime(2026, 10, 12, 14, 30, 0, tzinfo=VN_TZ)
     assert is_turbo_active(t_normal) is False
-    assert calculate_adaptive_interval(t_normal) == 30
+    assert calculate_adaptive_interval(t_normal) >= 15
+
+# 29. Mã biên 30% max 100k min 100k phải đạt điểm >= 65 (vượt qua ngưỡng notify)
+def test_29_edge_30_percent_score_reaches_notify_threshold():
+    v = {
+        "discount_type": "PERCENT",
+        "discount_value": 30.0,
+        "max_discount": 100000.0,
+        "min_order_value": 100000.0,
+        "scope_type": "PLATFORM",
+        "source_type": "CAMPAIGN_PAGE",
+        "start_time": "00:00 12/10/2026",
+        "end_time": "23:59 12/10/2026",
+        "status": "ACTIVE"
+    }
+    score, label, breakdown = calculate_elite_score(v)
+    assert score >= 65, f"Điểm mã 30% biên: {score} < 65"
+    assert label == "💎 ĐÁNG LẤY"
+    assert breakdown["saving"] == 14
+    assert breakdown["rate"] == 12
+    assert breakdown["min_order"] == 18
+
+# 30. Mã 20% max 200k không vượt qua filter và không bao giờ notify
+def test_30_noisy_20_percent_max_200k_rejected():
+    from core.voucher_filter import is_worthy_voucher
+    v = {
+        "discount_type": "PERCENT",
+        "discount_value": 20.0,
+        "max_discount": 200000.0,
+        "min_order_value": 500000.0
+    }
+    assert is_worthy_voucher(v) is False
+    is_elite, reason = is_elite_voucher(v)
+    assert is_elite is False
+    assert "20% < 30%" in reason
+
+# 31. Mã shop 50đ không bị ép thành 50% và bị loại vì < 30k
+def test_31_shop_voucher_50d_not_percentage():
+    raw_v = {
+        "discount_value": 50,
+        "min_spend": 100000
+    }
+    d_val = float(raw_v.get("discount_value") or 0)
+    is_pct = bool(raw_v.get("discount_percentage") or raw_v.get("discount_percent") or raw_v.get("is_percent"))
+    assert is_pct is False
+    assert d_val == 50.0
+
+    from core.voucher_filter import is_worthy_voucher
+    v_dict = {
+        "discount_type": "FIXED",
+        "discount_value": d_val,
+        "min_order_value": 100000
+    }
+    assert is_worthy_voucher(v_dict) is False
+
+# 32. Nguồn PAYMENT (SPayLater/ShopeePay) nhận 7 điểm scope
+def test_32_payment_scope_receives_7_points():
+    v = {
+        "discount_type": "FIXED",
+        "discount_value": 100000,
+        "min_order_value": 200000,
+        "scope_type": "PAYMENT",
+        "source_type": "CAMPAIGN_PAGE",
+        "start_time": "00:00 12/10/2026",
+        "end_time": "23:59 12/10/2026"
+    }
+    score, _, breakdown = calculate_elite_score(v)
+    assert breakdown["scope"] == 7
+    assert score >= 70
+
+# 33. Reminder Lifecycle chặn voucher có điểm < 65
+def test_33_lifecycle_reminder_blocks_weak_vouchers():
+    from core.voucher_lifecycle import check_upcoming_reminder
+    now = datetime.now(VN_TZ)
+    t_start = (now + timedelta(minutes=10)).strftime("%H:%M %d/%m/%Y")
+    v = Voucher(
+        id="UPCOMING_V",
+        platform="SHOPEE",
+        title="Mã sắp mở",
+        status=VoucherStatus.UPCOMING_CODE_KNOWN,
+        start_time=t_start,
+        end_time=(now + timedelta(hours=2)).strftime("%H:%M %d/%m/%Y"),
+        discount_type=DiscountType.FIXED,
+        discount_value=30000,
+        min_order_value=0,
+        scope_type=ScopeType.PLATFORM,
+        source_url="https://shopee.vn",
+        source_type="CAMPAIGN_PAGE"
+    )
+    # Điểm 60 < 65: bị chặn không gửi reminder
+    assert check_upcoming_reminder(v, elite_score=60) is None
+    # Điểm 66 >= 65: cho phép nhắc nhở T-15m
+    assert check_upcoming_reminder(v, elite_score=66) == "REMINDER_15M"
+
+# 34. Báo cáo /coverage hiển thị trạng thái Ví cá nhân NOT_CONNECTED (0)
+def test_34_coverage_report_shows_personal_status():
+    from app.bot.elite_templates import format_coverage_report
+    stats = {
+        "cookie_enabled": False,
+        "personal_status": "NOT_CONNECTED (0)",
+        "sources": {}
+    }
+    rep = format_coverage_report(stats, tracked_count=11)
+    assert "NOT_CONNECTED (0)" in rep
+    assert "Ví voucher cá nhân" in rep

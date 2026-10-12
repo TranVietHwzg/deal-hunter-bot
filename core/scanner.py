@@ -77,6 +77,21 @@ async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
 
     return scan_res
 
+async def run_lifecycle_step(bot_instance=None):
+    """Kiểm tra nhẹ vòng đời và gửi nhắc nhở (tiêu tốn < 1ms, 0 MB RAM)"""
+    lifecycle_notifs = lifecycle_service.run_lifecycle_cycle()
+    if bot_instance:
+        for item in lifecycle_notifs:
+            itype = item.get("type")
+            v = item.get("voucher")
+            if not v:
+                continue
+            if itype == "VOUCHER_OPENED":
+                await bot_instance.broadcast_active_voucher(v)
+            elif itype in ("REMINDER_24H", "REMINDER_15M", "REMINDER_2M"):
+                await bot_instance.broadcast_reminder(v, itype)
+    return lifecycle_notifs
+
 GOLD_HOURS = [0, 12, 20]
 
 def is_turbo_active(now: Optional[datetime] = None) -> bool:
@@ -116,30 +131,69 @@ def is_turbo_active(now: Optional[datetime] = None) -> bool:
     return False
 
 def calculate_adaptive_interval(now: Optional[datetime] = None) -> int:
-    """
-    Tính toán khoảng thời gian ngủ thích ứng (Adaptive Interval):
-    - Chế độ TURBO (2s): 15 phút trước khung giờ vàng (0H, 12H, 20H) hoặc trước giờ mở mã.
-    - Chế độ NORMAL (30s): Các khoảng thời gian còn lại.
-    """
+    """Khoảng thời gian nghỉ giữa các lần kiểm tra nhắc giờ"""
     if now is None:
         now = datetime.now(VN_TZ)
-
-    if is_turbo_active(now):
-        return 2  # Turbo mode: 2 giây
-
-    return 30  # Normal mode: 30 giây
+    return 5 if is_turbo_active(now) else 15
 
 async def background_radar_loop(bot_instance=None, config=None):
-    """Vòng lặp chạy nền của Radar với tần suất thích ứng"""
-    print("[Radar Scheduler] Khởi động tiến trình theo dõi mã sắp mở Shopee 24/7...")
+    """
+    Vòng lặp chạy nền của Radar tối ưu hóa bộ nhớ cho Render 512MB:
+    - Fast loop (5s - 15s): Kiểm tra chính xác giờ mở mã (Lifecycle & Reminder) tốn 0MB RAM.
+    - Deep discovery loop (30s - 60s): Quét đa nguồn thu thập deal mới, dọn RAM ngay sau mỗi lượt (gc.collect()).
+    """
+    import gc
+    import time
+
+    print("[Radar Scheduler] Khởi động tiến trình theo dõi mã sắp mở Shopee 24/7 (Memory Safe)...")
+    last_deep_scan = 0
+
     while True:
         try:
-            await run_radar_cycle(bot_instance)
+            now_ts = time.time()
+            now_dt = datetime.now(VN_TZ)
+            turbo = is_turbo_active(now_dt)
+
+            # 1. Luôn chạy kiểm tra vòng đời & nhắc nhở (rất nhẹ, không tốn RAM)
+            await run_lifecycle_step(bot_instance)
+
+            # 2. Chu kỳ cào sâu toàn mạng (Deep Discovery):
+            # Trong khung giờ vàng cào 30s/lần; thời gian thường cào 60s/lần
+            deep_interval = 30 if turbo else 60
+            if now_ts - last_deep_scan >= deep_interval:
+                scan_res = await orchestrator.run_discovery_cycle()
+                last_deep_scan = now_ts
+                if bot_instance:
+                    notifier = getattr(bot_instance, "elite_notifier", None)
+                    for ev in scan_res.get("events_to_notify", []):
+                        ev_type = ev.get("type")
+                        v = ev.get("voucher")
+                        if not v:
+                            continue
+                        mapped_type = {
+                            "READY_NOW": "ACTIVE_NEW",
+                            "UPCOMING": "UPCOMING_KNOWN",
+                            "WATCH": "UPCOMING_UNKNOWN",
+                            "CODE_REVEALED": "CODE_REVEALED"
+                        }.get(ev_type, ev_type)
+                        if notifier:
+                            await notifier.notify_elite_voucher(v, mapped_type, score=v.confidence_score)
+                        else:
+                            if ev_type in ("UPCOMING", "WATCH"):
+                                await bot_instance.broadcast_upcoming_voucher(v)
+                            elif ev_type == "READY_NOW":
+                                await bot_instance.broadcast_active_voucher(v)
+                            elif ev_type == "CODE_REVEALED":
+                                await bot_instance.broadcast_code_revealed(v)
+
+                # Thu gom rác ngay lập tức sau chu kỳ quét sâu để giải phóng RAM về OS
+                gc.collect()
+
         except Exception as e:
             print(f"[Radar Scheduler Error] Lỗi chu kỳ quét: {e}")
 
-        interval = calculate_adaptive_interval()
-        await asyncio.sleep(interval)
+        sleep_interval = calculate_adaptive_interval()
+        await asyncio.sleep(sleep_interval)
 
 # Tương thích ngược
 run_scan_cycle = run_radar_cycle

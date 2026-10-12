@@ -143,7 +143,7 @@ def check_upcoming_reminder(voucher: Voucher, elite_score: Optional[int] = None)
     if raw_status not in ("UPCOMING_CODE_KNOWN", "UPCOMING_UNKNOWN_CODE"):
         return None
 
-    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 70)
+    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 65)
     if elite_score is not None and elite_score < min_notify:
         return None
 
