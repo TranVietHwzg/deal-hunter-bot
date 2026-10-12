@@ -1,7 +1,7 @@
 {
   "telegram": {
-    "bot_token": "8914288470:AAH343kg5FQOkL9EpJKxm4Fq95-raxBnxFk",
-    "chat_id": "8483531921",
+    "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "chat_id": "YOUR_TELEGRAM_CHAT_ID",
     "is_muted": false
   },
   "settings": {
