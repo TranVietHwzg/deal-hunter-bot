@@ -54,10 +54,12 @@ def calculate_elite_score(
         else:
             real_saving = max_d if max_d is not None else dval
 
-    if real_saving >= 200000.0:
+    if real_saving >= 500000.0:
+        score_saving = 35
+    elif real_saving >= 200000.0:
         score_saving = 30
     elif real_saving >= 100000.0:
-        score_saving = 25
+        score_saving = 28
     elif real_saving >= 50000.0:
         score_saving = 18
     elif real_saving >= 30000.0:
@@ -80,6 +82,9 @@ def calculate_elite_score(
         score_rate = 15
     elif discount_rate >= 30.0:
         score_rate = 10
+    elif real_saving >= 100000.0 and discount_rate >= 15.0:
+        # Mã to giảm >= 100k tiền mặt, tỷ lệ từ 15% - 29% vẫn là deal rất giá trị
+        score_rate = 10
     else:
         score_rate = 0
 
@@ -92,9 +97,13 @@ def calculate_elite_score(
         if ratio <= 2.0:
             score_min_order = 16
         elif ratio <= 3.0:
-            score_min_order = 12
+            score_min_order = 14 if real_saving >= 100000.0 else 12
         elif ratio <= 4.0:
-            score_min_order = 5
+            score_min_order = 12 if real_saving >= 100000.0 else 5
+        elif ratio <= 5.0 and real_saving >= 100000.0:
+            score_min_order = 10
+        elif ratio <= 8.0 and real_saving >= 100000.0:
+            score_min_order = 6
         else:
             score_min_order = 0
 

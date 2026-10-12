@@ -74,10 +74,10 @@ def stack_vouchers_and_evaluate(product: Dict[str, Any], available_vouchers: Lis
     real_discount_pct = round((savings / baseline_price) * 100.0, 1) if baseline_price > 0 else stack_res["discount_percent"]
 
     # Đánh giá mục tiêu
-    target_mode = str(product.get("target_mode", "PERCENT")).upper()
-    target_value = float(product.get("target_value", 30.0))
+    target_mode = str(product.get("target_mode", "PRICE" if ("target_price" in product or "target_deal_price" in product) else "PERCENT")).upper()
+    target_value = float(product.get("target_price") or product.get("target_deal_price") or product.get("target_value", 30.0))
 
-    if target_mode == "PERCENT":
+    if target_mode in ("PERCENT", "PERCENTAGE"):
         is_deal_ready = real_discount_pct >= target_value
     else:
         is_deal_ready = final_price <= target_value

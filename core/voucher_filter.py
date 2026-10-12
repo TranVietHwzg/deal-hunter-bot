@@ -65,7 +65,9 @@ def is_worthy_voucher(
     if dtype in ("FIXED", "FIXED_AMOUNT"):
         return dval >= min_fixed_discount
     elif dtype in ("PERCENT", "PERCENTAGE"):
-        return (dval >= min_percent_rate) and (max_d >= min_percent_cap)
+        is_high_rate = (dval >= min_percent_rate) and (max_d >= min_percent_cap)
+        is_big_cap = (max_d >= 100000.0) and (dval >= 10.0)
+        return is_high_rate or is_big_cap
 
     return False
 

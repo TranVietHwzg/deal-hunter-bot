@@ -63,12 +63,14 @@ class LifecycleService:
 
         notifications_to_send: List[Dict[str, Any]] = []
 
-        # Ưu tiên lấy toàn bộ UPCOMING (để không bỏ lỡ lịch nhắc T-15/T-2), kết hợp ACTIVE
+        # Ưu tiên lấy toàn bộ UPCOMING (để không bỏ lỡ lịch nhắc 24h/15m/2m), kết hợp ACTIVE và EXHAUSTED
         upcoming_vouchers = self.voucher_repo.get_upcoming_vouchers(days=7)
-        other_vouchers = self.voucher_repo.get_vouchers(limit=500)
+        active_vouchers = self.voucher_repo.get_active_vouchers()
+        exhausted_vouchers = self.voucher_repo.get_vouchers(status=VoucherStatus.EXHAUSTED, limit=200)
+        other_vouchers = self.voucher_repo.get_vouchers(limit=300)
         seen_ids = set()
         all_vouchers = []
-        for v in upcoming_vouchers + other_vouchers:
+        for v in upcoming_vouchers + active_vouchers + exhausted_vouchers + other_vouchers:
             if v.id not in seen_ids:
                 seen_ids.add(v.id)
                 all_vouchers.append(v)

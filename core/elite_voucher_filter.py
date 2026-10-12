@@ -154,6 +154,14 @@ def is_elite_voucher(
         if dval >= 30000.0 and min_o == 0:
             return True, "Đạt Elite: Giảm >= 30k đơn 0đ"
 
+        # Điều kiện C: Mã TO (giảm >= 100k) cho phép tỷ lệ đơn tối thiểu đến 5.0 (Ví dụ: 100k/500k, 500k/2.5tr, 1M/5tr)
+        if dval >= 100000.0:
+            ratio = min_o / dval
+            if ratio <= 5.0:
+                return True, f"Đạt Elite Mã To: Giảm {int(dval):,}đ đơn {int(min_o):,}đ (tỷ lệ {ratio:.1f} <= 5)"
+            else:
+                return False, f"Loại: Điều kiện đơn quá cao cho mã to (tỷ lệ {ratio:.1f} > 5)"
+
         # Điều kiện B: Giảm >= 50k và min_order / discount <= 3
         if dval >= 50000.0:
             ratio = min_o / dval
@@ -179,9 +187,10 @@ def is_elite_voucher(
             return False, f"Loại: Mức giảm tối đa {int(max_d):,}đ < {int(min_cap):,}đ"
 
         # Kiểm tra điều kiện đơn tối thiểu không quá cao so với max_discount
-        # Ví dụ: Giảm 30% tối đa 100k, đơn từ 2 triệu -> Loại (2tr / 100k = 20 > 4)
-        if min_o > max_d * 4.0:
-            return False, f"Loại: Điều kiện đơn {int(min_o):,}đ quá cao so với trần giảm {int(max_d):,}đ"
+        # Cho phép trần >= 100k có đơn tối thiểu đến 8 lần trần giảm (Ví dụ: 30% tối đa 100k đơn 800k)
+        max_ratio_allowed = 8.0 if max_d >= 100000.0 else 4.0
+        if min_o > max_d * max_ratio_allowed:
+            return False, f"Loại: Điều kiện đơn {int(min_o):,}đ quá cao so với trần giảm {int(max_d):,}đ (vượt {max_ratio_allowed:.0f}x)"
 
         # Tính tiết kiệm ước tính tại đơn tối thiểu
         # estimated_saving_at_minimum_order = min(min_order_value * (discount_percent / 100), max_discount)
@@ -205,6 +214,7 @@ def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
     - Loại trừ: Freeship, hết hạn, hủy, không hợp lệ
     - HIGH_RATE: Giảm >= 30% (kể cả trần nhỏ, nhằm bắt trọn deal tỷ lệ cao)
     - ELITE_VALUE: Giảm >= 30.000đ đơn 0đ HOẶC giảm >= 30% với mức tiết kiệm dự kiến >= 30.000đ
+      (Bao gồm mã TO: giảm >= 100k với ratio <= 5.0, trần >= 100k với ratio <= 8.0)
     """
     ship, reason = is_freeship(data)
     if ship:
@@ -221,11 +231,14 @@ def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
             tags.append("HIGH_RATE")
             # Đạt ELITE_VALUE nếu có trần >= 30.000đ hoặc tiết kiệm thực tế >= 30.000đ
             effective_saving = max_d if (max_d is not None) else (min_o * (dval / 100.0) if min_o > 0 else 0)
-            if (max_d is not None and max_d >= min_cap) or effective_saving >= min_cap:
+            max_ratio = 8.0 if (max_d is not None and max_d >= 100000.0) else 4.0
+            if (max_d is not None and max_d >= min_cap and min_o <= max_d * max_ratio) or effective_saving >= min_cap:
                 tags.append("ELITE_VALUE")
 
     elif dtype in ("FIXED", "FIXED_AMOUNT"):
         if dval >= min_fixed and min_o == 0:
+            tags.append("ELITE_VALUE")
+        elif dval >= 100000.0 and (min_o / dval <= 5.0):
             tags.append("ELITE_VALUE")
         elif dval >= 50000.0 and (min_o / dval <= 3.0):
             tags.append("ELITE_VALUE")

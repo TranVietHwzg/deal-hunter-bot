@@ -121,13 +121,26 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
 
         tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
         if not tracked:
-            # Tự động gieo mầm (seed) các gian hàng Mall công nghệ mục tiêu để không bị sót voucher shop
-            try:
-                self.shop_repo.add_shop("318414434", "Anker Official Store", "https://shopee.vn/anker_official_store_vn")
-                self.shop_repo.add_shop("290130836", "Baseus Official Mall", "https://shopee.vn/baseus_official_mall")
-                tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
-            except Exception:
-                pass
+            # Tự động gieo mầm (seed) các gian hàng Mall chính hãng mục tiêu để bắt mã shop to 100k-500k
+            DEFAULT_MALL_SHOPS = [
+                ("318414434", "Anker Official Store", "https://shopee.vn/anker_official_store_vn"),
+                ("290130836", "Baseus Official Mall", "https://shopee.vn/baseus_official_mall"),
+                ("264259837", "Ugreen Official Store", "https://shopee.vn/ugreen.vn"),
+                ("48480302", "Samsung Official Store", "https://shopee.vn/samsung_official_store"),
+                ("88201622", "Apple Flagship Store", "https://shopee.vn/apple_flagship_store"),
+                ("170566275", "Xiaomi Official Store", "https://shopee.vn/xiaomi_official_store"),
+                ("186177579", "Logitech Official Store", "https://shopee.vn/logitech_official_store"),
+                ("84826189", "Philips Official Store", "https://shopee.vn/philips_official_store"),
+                ("101666624", "Tefal Official Store", "https://shopee.vn/tefal_official_store"),
+                ("112836263", "Sunhouse Official Store", "https://shopee.vn/sunhouse_official_store"),
+                ("231267823", "Lock&Lock Official Store", "https://shopee.vn/locknlock_official_store"),
+            ]
+            for s_id, s_name, s_url in DEFAULT_MALL_SHOPS:
+                try:
+                    self.shop_repo.add_shop(s_id, s_name, s_url)
+                except Exception:
+                    pass
+            tracked = self.shop_repo.get_tracked_shops(enabled_only=True)
 
         if not tracked:
             self.status = "NO_SHOPS_CONFIGURED"

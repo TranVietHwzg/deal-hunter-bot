@@ -77,36 +77,57 @@ async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
 
     return scan_res
 
-def calculate_adaptive_interval() -> int:
+GOLD_HOURS = [0, 12, 20]
+
+def is_turbo_active(now: Optional[datetime] = None) -> bool:
+    """
+    Kiểm tra xem hiện tại có đang trong khung thời gian Turbo (2s) không:
+    - 15 phút trước và 5 phút sau các khung giờ vàng Shopee: 0H, 12H, 20H.
+    - 15 phút trước và 5 phút sau giờ mở của bất kỳ voucher UPCOMING nào trong hệ thống.
+    """
+    if now is None:
+        now = datetime.now(VN_TZ)
+
+    # 1. Cự ly tới các khung giờ vàng
+    for gh in GOLD_HOURS:
+        target_today = datetime(now.year, now.month, now.day, gh, 0, tzinfo=VN_TZ)
+        diff_secs = (target_today - now).total_seconds()
+        if -300 <= diff_secs <= 900:
+            return True
+        # Xét thêm 0h ngày mai nếu hiện tại là 23h45 - 23h59
+        if gh == 0 and now.hour == 23:
+            target_next = target_today + timedelta(days=1)
+            diff_next = (target_next - now).total_seconds()
+            if -300 <= diff_next <= 900:
+                return True
+
+    # 2. Cự ly tới giờ mở của các voucher sắp mở
+    try:
+        upcoming = voucher_repo.get_upcoming_vouchers(days=1)
+        for v in upcoming:
+            dt = parse_vietnam_time(v.start_time)
+            if dt:
+                diff = (dt - now).total_seconds()
+                if -300 <= diff <= 900:
+                    return True
+    except Exception:
+        pass
+
+    return False
+
+def calculate_adaptive_interval(now: Optional[datetime] = None) -> int:
     """
     Tính toán khoảng thời gian ngủ thích ứng (Adaptive Interval):
-    - Có mã sắp mở trong < 5 phút: quét mỗi 30s (chống miss mã 0đ)
-    - Có mã sắp mở trong < 30 phút: quét mỗi 5 phút (300s)
-    - Có mã sắp mở trong < 24 giờ: quét mỗi 15 phút (900s)
-    - Bình thường: quét mỗi 60 phút (3600s)
+    - Chế độ TURBO (2s): 15 phút trước khung giờ vàng (0H, 12H, 20H) hoặc trước giờ mở mã.
+    - Chế độ NORMAL (30s): Các khoảng thời gian còn lại.
     """
-    upcoming = voucher_repo.get_upcoming_vouchers(days=1)
-    if not upcoming:
-        return 3600
+    if now is None:
+        now = datetime.now(VN_TZ)
 
-    now = datetime.now(VN_TZ)
-    min_diff = None
-    for v in upcoming:
-        dt = parse_vietnam_time(v.start_time)
-        if dt and dt > now:
-            diff = (dt - now).total_seconds()
-            if min_diff is None or diff < min_diff:
-                min_diff = diff
+    if is_turbo_active(now):
+        return 2  # Turbo mode: 2 giây
 
-    if min_diff is not None:
-        if min_diff <= 5 * 60:
-            return 30  # 30 giây, chống miss mã 100k/0đ
-        if min_diff <= 30 * 60:
-            return 300  # 5 phút
-        elif min_diff <= 24 * 3600:
-            return 900  # 15 phút
-
-    return 3600
+    return 30  # Normal mode: 30 giây
 
 async def background_radar_loop(bot_instance=None, config=None):
     """Vòng lặp chạy nền của Radar với tần suất thích ứng"""

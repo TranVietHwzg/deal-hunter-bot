@@ -500,3 +500,136 @@ def test_22_year_rollover_datetime():
     assert parsed is not None
     # 01/01 của năm nay đã qua nhiều tháng, nên sẽ rollover sang năm sau
     assert parsed.year == current_year + 1
+
+# 23. Mã to FIXED: 100k đơn 500k (tỷ lệ 5.0 <= 5.0) đạt chuẩn Elite
+def test_23_big_voucher_100k_min_500k_accepted():
+    v = {
+        "discount_type": "FIXED",
+        "discount_value": 100000.0,
+        "min_order_value": 500000.0,
+        "title": "Mã to 100k đơn 500k",
+        "is_freeship": 0
+    }
+    is_elite, reason = is_elite_voucher(v)
+    assert is_elite is True
+    assert "Đạt Elite Mã To" in reason
+
+# 24. Mã to FIXED: 500k đơn 2.5tr (tỷ lệ 5.0 <= 5.0) đạt chuẩn Elite
+def test_24_big_voucher_500k_min_2500k_accepted():
+    v = {
+        "discount_type": "FIXED",
+        "discount_value": 500000.0,
+        "min_order_value": 2500000.0,
+        "title": "Mã to công nghệ 500k đơn 2.5tr",
+        "is_freeship": 0
+    }
+    is_elite, reason = is_elite_voucher(v)
+    assert is_elite is True
+    assert "Đạt Elite Mã To" in reason
+
+# 25. Mã to FIXED: 100k đơn 600k (tỷ lệ 6.0 > 5.0) bị loại
+def test_25_big_voucher_100k_min_600k_rejected():
+    v = {
+        "discount_type": "FIXED",
+        "discount_value": 100000.0,
+        "min_order_value": 600000.0,
+        "title": "Mã 100k đơn 600k",
+        "is_freeship": 0
+    }
+    is_elite, reason = is_elite_voucher(v)
+    assert is_elite is False
+    assert "Điều kiện đơn quá cao cho mã to" in reason
+
+# 26. Mã to PERCENT: 30% tối đa 100k đơn 800k (tỷ lệ 8.0 <= 8.0) đạt chuẩn Elite
+def test_26_big_percent_30_cap_100k_min_800k_accepted():
+    v = {
+        "discount_type": "PERCENT",
+        "discount_value": 30.0,
+        "max_discount": 100000.0,
+        "min_order_value": 800000.0,
+        "title": "Mã to 30% tối đa 100k đơn 800k",
+        "is_freeship": 0
+    }
+    is_elite, reason = is_elite_voucher(v)
+    assert is_elite is True
+    assert "Đạt Elite" in reason
+
+# 27. Điểm Elite mã to (100k/500k và 500k/2.5tr) đạt >= 70 điểm và phát thông báo Telegram
+def test_27_big_voucher_scores_and_notification():
+    async def _test():
+        bot = DummyBot()
+        notifier = EliteNotificationService(bot)
+        
+        # Mã 1: 100k đơn 500k
+        v1 = {
+            "platform": "SHOPEE",
+            "voucher_code": "BIG100K",
+            "scope_type": "PLATFORM",
+            "discount_type": "FIXED",
+            "discount_value": 100000.0,
+            "min_order_value": 500000.0,
+            "title": "Mã sàn to 100k đơn 500k",
+            "start_time": "00:00 12/10/2026",
+            "end_time": "23:59 12/10/2026",
+            "source_type": "CAMPAIGN_PAGE",
+            "source_url": "https://shopee.vn/m/sieu-sale-cong-nghe",
+            "is_freeship": 0
+        }
+        score1, label1, _ = calculate_elite_score(v1)
+        assert score1 >= 70  # Qua cổng thông báo 70 điểm!
+        
+        # Mã 2: 500k đơn 2.5tr
+        v2 = {
+            "platform": "SHOPEE",
+            "voucher_code": "TECH500K",
+            "scope_type": "PLATFORM",
+            "discount_type": "FIXED",
+            "discount_value": 500000.0,
+            "min_order_value": 2500000.0,
+            "title": "Mã công nghệ 500k đơn 2.5tr",
+            "start_time": "00:00 12/10/2026",
+            "end_time": "23:59 12/10/2026",
+            "source_type": "CAMPAIGN_PAGE",
+            "source_url": "https://shopee.vn/m/sieu-sale-cong-nghe",
+            "is_freeship": 0
+        }
+        score2, label2, _ = calculate_elite_score(v2)
+        assert score2 >= 70
+        assert "🔥 SIÊU XỊN" in label2 or "💎 ĐÁNG LẤY" in label2
+
+        # Gửi thử nghiệm thông báo
+        v_obj = Voucher(
+            id="V_BIG_100K",
+            platform="SHOPEE",
+            voucher_code="BIG100K",
+            title="Mã sàn to 100k đơn 500k",
+            scope_type=ScopeType.PLATFORM,
+            discount_type=DiscountType.FIXED,
+            discount_value=100000.0,
+            min_order_value=500000.0,
+            start_time="00:00 12/10/2026",
+            end_time="23:59 12/10/2026",
+            status=VoucherStatus.ACTIVE,
+            source_url="https://shopee.vn/m/sieu-sale-cong-nghe",
+            source_type="CAMPAIGN_PAGE"
+        )
+        sent = await notifier.notify_elite_voucher(v_obj, "ACTIVE_NEW", score=score1)
+        assert sent is True
+        assert len(bot.sent_messages) == 1
+        assert "BIG100K" in bot.sent_messages[0]["text"]
+
+    import asyncio
+    asyncio.run(_test())
+
+# 28. Turbo Scanner: Tự động kích hoạt 2s trước khung giờ vàng 0H/12H/20H (cách 10m) và 30s thời gian khác
+def test_28_scanner_turbo_mode():
+    from core.scanner import is_turbo_active, calculate_adaptive_interval
+    # Thời điểm 11:50 (cách 12:00 10 phút) -> TURBO (2s)
+    t_turbo = datetime(2026, 10, 12, 11, 50, 0, tzinfo=VN_TZ)
+    assert is_turbo_active(t_turbo) is True
+    assert calculate_adaptive_interval(t_turbo) == 2
+
+    # Thời điểm 14:30 (không gần giờ vàng, không có mã sắp mở) -> NORMAL (30s)
+    t_normal = datetime(2026, 10, 12, 14, 30, 0, tzinfo=VN_TZ)
+    assert is_turbo_active(t_normal) is False
+    assert calculate_adaptive_interval(t_normal) == 30
