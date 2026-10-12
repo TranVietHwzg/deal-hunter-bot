@@ -74,6 +74,9 @@ async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
                 await bot_instance.broadcast_active_voucher(v)
             elif itype in ("REMINDER_15M", "REMINDER_2M"):
                 await bot_instance.broadcast_reminder(v, itype)
+            elif itype in ("VOUCHER_EXHAUSTED", "VOUCHER_EXPIRED"):
+                if hasattr(bot_instance, "broadcast_voucher_exhausted"):
+                    await bot_instance.broadcast_voucher_exhausted(v, itype)
 
     return scan_res
 
@@ -95,6 +98,9 @@ async def run_lifecycle_step(bot_instance=None):
                     await bot_instance.broadcast_active_voucher(v)
             elif itype in ("REMINDER_24H", "REMINDER_15M", "REMINDER_2M"):
                 await bot_instance.broadcast_reminder(v, itype)
+            elif itype in ("VOUCHER_EXHAUSTED", "VOUCHER_EXPIRED"):
+                if hasattr(bot_instance, "broadcast_voucher_exhausted"):
+                    await bot_instance.broadcast_voucher_exhausted(v, itype)
     return lifecycle_notifs
 
 GOLD_HOURS = [0, 12, 20]

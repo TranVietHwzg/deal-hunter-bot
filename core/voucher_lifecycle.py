@@ -95,9 +95,11 @@ def evaluate_lifecycle_transition(voucher: Voucher) -> Tuple[Optional[VoucherSta
     start_dt = parse_vietnam_time(voucher.start_time)
     end_dt = parse_vietnam_time(voucher.end_time)
 
-    # 1. Hết hạn (EXPIRED)
-    if end_dt and now > end_dt and voucher.status not in (VoucherStatus.EXPIRED, VoucherStatus.CANCELLED):
-        return VoucherStatus.EXPIRED, "VOUCHER_EXPIRED"
+    # 1. Hết hạn (EXPIRED) hoặc không hợp lệ (INVALID)
+    v_stat = voucher.verification_status.value if hasattr(voucher.verification_status, "value") else str(voucher.verification_status)
+    if (end_dt and now > end_dt) or v_stat == "INVALID":
+        if voucher.status not in (VoucherStatus.EXPIRED, VoucherStatus.CANCELLED):
+            return VoucherStatus.EXPIRED, "VOUCHER_EXPIRED"
 
     # 2. Khôi phục từ EXHAUSTED sang ACTIVE nếu còn hạn và percentage_used < 100
     if voucher.status == VoucherStatus.EXHAUSTED:

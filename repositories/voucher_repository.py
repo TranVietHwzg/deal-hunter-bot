@@ -507,6 +507,7 @@ class VoucherRepository(BaseRepository):
             SELECT * FROM vouchers 
             WHERE is_freeship = 0 
               AND verification_status IN ('VERIFIED_ACTIVE', 'VERIFIED_UPCOMING')
+              AND status NOT IN ('EXHAUSTED', 'EXPIRED', 'CANCELLED')
             ORDER BY (verification_status = 'VERIFIED_ACTIVE') DESC, discount_value DESC
             LIMIT ?
             """, (limit,)).fetchall()

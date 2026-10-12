@@ -332,6 +332,44 @@ class TelegramBotService:
         ))
         return True
 
+    async def broadcast_voucher_exhausted(self, voucher: Voucher, event_type: str = "VOUCHER_EXHAUSTED") -> bool:
+        """Gửi cảnh báo mã Elite đã hết lượt hoặc hết hiệu lực"""
+        fp = self.dedupe_service.calculate_fingerprint(voucher, event_type)
+        if self.dedupe_service.is_duplicate(fp):
+            return False
+
+        from app.bot.elite_templates import format_discount_display, format_currency, format_code_block
+
+        if event_type == "VOUCHER_EXHAUSTED":
+            title = "⚠️ <b>MÃ ĐÃ CHÁY LƯỢT DÙNG!</b>"
+            detail = "<b>Trạng thái:</b> ❌ Đã dùng 100% (Hết lượt trên Shopee)"
+        else:
+            title = "⏳ <b>MÃ ĐÃ HẾT HIỆU LỰC!</b>"
+            detail = f"<b>Hạn dùng:</b> ❌ {voucher.end_time or 'Đã kết thúc'}"
+
+        text = (
+            f"{title}\n"
+            "────────────────────\n"
+            f"{format_code_block(voucher)}\n"
+            f"• <b>Mức giảm:</b> Giảm {format_discount_display(voucher)} (Đơn {format_currency(voucher.min_order_value)})\n"
+            f"• {detail}\n"
+            "────────────────────\n"
+            "👉 <i>Tạm dừng áp mã này để tránh mất thời gian!</i>"
+        )
+        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
+        res = await self.send_message(text, reply_markup=markup)
+        msg_id = res.get("result", {}).get("message_id") if res else None
+
+        ev_enum = NotificationEventType.VOUCHER_EXHAUSTED if event_type == "VOUCHER_EXHAUSTED" else NotificationEventType.VOUCHER_EXPIRED
+        self.scan_repo.record_notification(NotificationEvent(
+            id=f"NOTIF_{uuid.uuid4().hex[:8]}",
+            voucher_id=voucher.id,
+            event_type=ev_enum,
+            content_fingerprint=fp,
+            telegram_message_id=msg_id
+        ))
+        return True
+
     # ----------------- XỬ LÝ LỆNH & NÚT BẤM (BOT CONTROLS) -----------------
 
     def get_welcome_message(self) -> str:

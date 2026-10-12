@@ -101,7 +101,7 @@ class LifecycleService:
                 self.voucher_repo.update_status(v.id, new_status)
                 v.status = new_status
 
-                # Chỉ gửi thông báo khi mã mở (VOUCHER_OPENED), không gửi spam khi EXPIRED
+                # 1.1 Gửi thông báo khi mã mở (VOUCHER_OPENED)
                 if event_name == "VOUCHER_OPENED" and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
                     score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
                     min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 65)
@@ -110,6 +110,20 @@ class LifecycleService:
                         if not self.dedupe_service.is_duplicate(fp):
                             notifications_to_send.append({
                                 "type": "VOUCHER_OPENED",
+                                "voucher": v,
+                                "fingerprint": fp,
+                                "score": score
+                            })
+
+                # 1.2 Gửi cảnh báo khi mã Elite bị hết lượt dùng (VOUCHER_EXHAUSTED) hoặc hết hạn (VOUCHER_EXPIRED)
+                elif event_name in ("VOUCHER_EXHAUSTED", "VOUCHER_EXPIRED") and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
+                    score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
+                    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 65)
+                    if score >= min_notify:
+                        fp = self.dedupe_service.calculate_fingerprint(v, event_name)
+                        if not self.dedupe_service.is_duplicate(fp):
+                            notifications_to_send.append({
+                                "type": event_name,
                                 "voucher": v,
                                 "fingerprint": fp,
                                 "score": score

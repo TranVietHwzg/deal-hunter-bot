@@ -15,6 +15,8 @@ class NotificationEventType(str, Enum):
     REMINDER_5M = "REMINDER_5M"
     REMINDER_2M = "REMINDER_2M"
     VOUCHER_RESTOCKED = "VOUCHER_RESTOCKED"
+    VOUCHER_EXHAUSTED = "VOUCHER_EXHAUSTED"
+    VOUCHER_EXPIRED = "VOUCHER_EXPIRED"
 
 @dataclass
 class NotificationEvent:

@@ -192,10 +192,11 @@ class DedupeService:
                 source_title=raw_item.get("source_title"),
                 source_captured_at=raw_item.get("source_captured_at", now_iso),
                 source_evidence_excerpt=raw_item.get("source_evidence_excerpt"),
+                percentage_used=float(raw_item["percentage_used"]) if raw_item.get("percentage_used") is not None else None,
                 verification_status=v_status_enum,
                 confidence_score=int(raw_item.get("confidence_score", 90)),
                 is_freeship=int(raw_item.get("is_freeship", 0)),
-                status=init_status,
+                status=VoucherStatus.EXHAUSTED if (raw_item.get("percentage_used") is not None and float(raw_item["percentage_used"]) >= 100 and init_status == VoucherStatus.ACTIVE) else init_status,
                 first_seen_at=now_iso,
                 last_seen_at=now_iso,
                 verified_at=raw_item.get("verified_at"),
@@ -206,6 +207,14 @@ class DedupeService:
             is_new = True
         else:
             canonical_voucher = existing_canonical
+            # Cập nhật percentage_used nếu có
+            if raw_item.get("percentage_used") is not None:
+                try:
+                    pct = float(raw_item["percentage_used"])
+                    canonical_voucher.percentage_used = pct
+                except (ValueError, TypeError):
+                    pass
+
             # Kiểm tra trường hợp lộ mã (trước đây không có code, nay có code)
             if not canonical_voucher.voucher_code and code:
                 canonical_voucher.voucher_code = code
