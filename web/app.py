@@ -20,9 +20,9 @@ class AddProductPayload(BaseModel):
     target_mode: str = "PERCENT"
     target_value: float = 30.0
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def healthcheck():
-    """Endpoint kiểm tra trạng thái sức khỏe của hệ thống cho Render"""
+    """Endpoint kiểm tra trạng thái sức khỏe của hệ thống cho Render và UptimeRobot"""
     return {
         "status": "healthy",
         "service": "shopee-upcoming-hidden-voucher-radar",
@@ -109,7 +109,7 @@ async def api_scan_now():
     res = await run_radar_cycle(None)
     return {"ok": True, "result": res}
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def get_dashboard_html():
     return """
     <!DOCTYPE html>
