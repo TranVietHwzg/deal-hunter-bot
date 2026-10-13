@@ -248,7 +248,12 @@ class TelegramBotService:
         if self.dedupe_service.is_duplicate(fp):
             return False
 
-        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
+        markup = get_elite_voucher_action_keyboard(
+            voucher.source_url,
+            getattr(voucher, "shop_url", None),
+            voucher_id=voucher.id,
+            claim_type=getattr(voucher, "claim_type", "CODE")
+        )
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -268,7 +273,12 @@ class TelegramBotService:
             return False
 
         text = format_active_voucher(voucher)
-        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
+        markup = get_elite_voucher_action_keyboard(
+            voucher.source_url,
+            getattr(voucher, "shop_url", None),
+            voucher_id=voucher.id,
+            claim_type=getattr(voucher, "claim_type", "CODE")
+        )
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -288,7 +298,12 @@ class TelegramBotService:
             return False
 
         text = format_countdown_reminder(voucher, reminder_type)
-        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
+        markup = get_elite_voucher_action_keyboard(
+            voucher.source_url,
+            getattr(voucher, "shop_url", None),
+            voucher_id=voucher.id,
+            claim_type=getattr(voucher, "claim_type", "CODE")
+        )
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -319,7 +334,12 @@ class TelegramBotService:
             return False
 
         text = format_code_revealed(voucher)
-        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
+        markup = get_elite_voucher_action_keyboard(
+            voucher.source_url,
+            getattr(voucher, "shop_url", None),
+            voucher_id=voucher.id,
+            claim_type=getattr(voucher, "claim_type", "CODE")
+        )
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -356,7 +376,12 @@ class TelegramBotService:
             "────────────────────\n"
             "👉 <i>Tạm dừng áp mã này để tránh mất thời gian!</i>"
         )
-        markup = get_elite_voucher_action_keyboard(voucher.source_url, getattr(voucher, "shop_url", None))
+        markup = get_elite_voucher_action_keyboard(
+            voucher.source_url,
+            getattr(voucher, "shop_url", None),
+            voucher_id=voucher.id,
+            claim_type=getattr(voucher, "claim_type", "CODE")
+        )
         res = await self.send_message(text, reply_markup=markup)
         msg_id = res.get("result", {}).get("message_id") if res else None
 
@@ -412,6 +437,27 @@ class TelegramBotService:
                 "<i>(Ví dụ: https://shopee.vn/ten_shop hoặc /addshop https://shopee.vn/ten_shop)</i>:"
             )
             await self.send_message(prompt, reply_markup=get_elite_back_keyboard())
+        elif data.startswith("fb:exhaust:"):
+            vid = data[len("fb:exhaust:"):]
+            v = self.voucher_repo.get_by_id(vid)
+            if v:
+                self.voucher_repo.update_status(v.id, VoucherStatus.EXHAUSTED)
+                with self.voucher_repo.transaction() as cur:
+                    cur.execute("UPDATE vouchers SET percentage_used = 100.0 WHERE id = ?", (v.id,))
+                code_lbl = v.voucher_code or v.id
+                reply_txt = (
+                    f"❌ <b>ĐÃ GHI NHẬN HẾT LƯỢT</b>\n\n"
+                    f"Mã <code>{code_lbl}</code> đã được cộng đồng báo hết lượt và chuyển sang trạng thái <b>EXHAUSTED</b> (hạ khỏi radar săn deal)."
+                )
+            else:
+                reply_txt = "⚠️ <i>Không tìm thấy bản ghi voucher trong hệ thống.</i>"
+            await self.send_message(reply_txt, reply_markup=get_elite_main_keyboard())
+        elif data.startswith("fb:like:"):
+            vid = data[len("fb:like:"):]
+            v = self.voucher_repo.get_by_id(vid)
+            code_lbl = v.voucher_code if v else vid
+            reply_txt = f"👍 <b>CẢM ƠN PHẢN HỒI!</b>\n\nĐã ghi nhận mã <code>{code_lbl}</code> vẫn còn hoạt động tốt!"
+            await self.send_message(reply_txt, reply_markup=get_elite_main_keyboard())
 
     async def handle_message(self, message: Dict[str, Any]) -> None:
         chat_id = str(message.get("chat", {}).get("id", self.chat_id))

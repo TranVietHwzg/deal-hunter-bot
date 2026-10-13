@@ -101,16 +101,44 @@ def evaluate_lifecycle_transition(voucher: Voucher) -> Tuple[Optional[VoucherSta
         if voucher.status not in (VoucherStatus.EXPIRED, VoucherStatus.CANCELLED):
             return VoucherStatus.EXPIRED, "VOUCHER_EXPIRED"
 
-    # 2. Khôi phục từ EXHAUSTED sang ACTIVE nếu còn hạn và percentage_used < 100
+    # 2. Khôi phục từ EXHAUSTED sang ACTIVE nếu còn hạn và percentage_used < 90%
     if voucher.status == VoucherStatus.EXHAUSTED:
-        if voucher.percentage_used is not None and voucher.percentage_used < 100:
+        if voucher.percentage_used is not None and voucher.percentage_used < 90.0:
             if not end_dt or now <= end_dt:
                 return VoucherStatus.ACTIVE, "VOUCHER_RESTOCKED"
 
-    # 3. Chuyển sang EXHAUSTED nếu đã hết lượt dùng
+    # 3. Chuyển sang EXHAUSTED nếu đã dùng >= 90% (trên Shopee 90% là thực tế đã hết lượt)
     if voucher.status == VoucherStatus.ACTIVE:
-        if voucher.percentage_used is not None and voucher.percentage_used >= 100:
+        if voucher.percentage_used is not None and voucher.percentage_used >= 90.0:
             return VoucherStatus.EXHAUSTED, "VOUCHER_EXHAUSTED"
+
+    # 3b. Heuristic Flash Expiration (TTL) cho mã Hot / Giảm sâu:
+    # Mã giảm >=30k đơn 0đ, >=30%, hoặc >=100k có ngân sách giới hạn
+    if voucher.status == VoucherStatus.ACTIVE:
+        dtype_str = voucher.discount_type.value if hasattr(voucher.discount_type, "value") else str(voucher.discount_type)
+        is_flash_deal = (
+            (dtype_str == "PERCENT" and voucher.discount_value >= 30.0) or
+            (dtype_str == "FIXED" and voucher.discount_value >= 30000.0 and voucher.min_order_value == 0.0) or
+            (voucher.discount_value >= 100000.0)
+        )
+        if is_flash_deal and start_dt:
+            age_seconds = (now - start_dt).total_seconds()
+            # Nếu đợt mở mã đã diễn ra hơn 24 giờ trước mà không có cập nhật restock -> hết lượt
+            if age_seconds >= 24 * 3600:
+                return VoucherStatus.EXHAUSTED, "VOUCHER_EXHAUSTED"
+            # Nếu đợt mở mã đã diễn ra hơn 3 giờ trước và không có tín hiệu mới -> hết lượt
+            elif age_seconds >= 3 * 3600:
+                last_time_str = voucher.last_checked_at or voucher.last_seen_at or voucher.source_captured_at
+                is_stale = True
+                if last_time_str:
+                    try:
+                        last_dt = datetime.fromisoformat(str(last_time_str).replace("Z", "+00:00"))
+                        if (datetime.now(timezone.utc) - last_dt).total_seconds() < 3 * 3600:
+                            is_stale = False
+                    except Exception:
+                        pass
+                if is_stale:
+                    return VoucherStatus.EXHAUSTED, "VOUCHER_EXHAUSTED"
 
     # 4. Đến giờ mở mã (UPCOMING_CODE_KNOWN -> ACTIVE)
     if voucher.status == VoucherStatus.UPCOMING_CODE_KNOWN:

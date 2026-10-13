@@ -169,6 +169,18 @@ class DedupeService:
                 claim_type=claim_type
             )
 
+            # Trích xuất percentage_used từ dữ liệu gốc hoặc excerpt
+            extracted_pct = None
+            if raw_item.get("percentage_used") is not None:
+                try:
+                    extracted_pct = float(raw_item["percentage_used"])
+                except Exception:
+                    pass
+            elif raw_item.get("source_evidence_excerpt"):
+                m_pct = re.search(r'Đã dùng:\s*(\d+(?:\.\d+)?)\s*%', raw_item["source_evidence_excerpt"])
+                if m_pct:
+                    extracted_pct = float(m_pct.group(1))
+
             canonical_voucher = Voucher(
                 id=canonical_id,
                 platform=platform,
@@ -192,11 +204,11 @@ class DedupeService:
                 source_title=raw_item.get("source_title"),
                 source_captured_at=raw_item.get("source_captured_at", now_iso),
                 source_evidence_excerpt=raw_item.get("source_evidence_excerpt"),
-                percentage_used=float(raw_item["percentage_used"]) if raw_item.get("percentage_used") is not None else None,
+                percentage_used=extracted_pct,
                 verification_status=v_status_enum,
                 confidence_score=int(raw_item.get("confidence_score", 90)),
                 is_freeship=int(raw_item.get("is_freeship", 0)),
-                status=VoucherStatus.EXHAUSTED if (raw_item.get("percentage_used") is not None and float(raw_item["percentage_used"]) >= 100 and init_status == VoucherStatus.ACTIVE) else init_status,
+                status=VoucherStatus.EXHAUSTED if (extracted_pct is not None and extracted_pct >= 90.0 and init_status == VoucherStatus.ACTIVE) else init_status,
                 first_seen_at=now_iso,
                 last_seen_at=now_iso,
                 verified_at=raw_item.get("verified_at"),
@@ -208,12 +220,21 @@ class DedupeService:
         else:
             canonical_voucher = existing_canonical
             # Cập nhật percentage_used nếu có
+            new_pct = None
             if raw_item.get("percentage_used") is not None:
                 try:
-                    pct = float(raw_item["percentage_used"])
-                    canonical_voucher.percentage_used = pct
+                    new_pct = float(raw_item["percentage_used"])
                 except (ValueError, TypeError):
                     pass
+            elif raw_item.get("source_evidence_excerpt"):
+                m_pct = re.search(r'Đã dùng:\s*(\d+(?:\.\d+)?)\s*%', raw_item["source_evidence_excerpt"])
+                if m_pct:
+                    new_pct = float(m_pct.group(1))
+
+            if new_pct is not None:
+                canonical_voucher.percentage_used = new_pct
+                if new_pct >= 90.0 and canonical_voucher.status == VoucherStatus.ACTIVE:
+                    canonical_voucher.status = VoucherStatus.EXHAUSTED
 
             # Kiểm tra trường hợp lộ mã (trước đây không có code, nay có code)
             if not canonical_voucher.voucher_code and code:

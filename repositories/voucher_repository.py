@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from repositories.base_repository import BaseRepository
@@ -274,6 +275,14 @@ class VoucherRepository(BaseRepository):
         """
         if voucher.is_freeship != 0:
             return {"is_new": False, "changes": []}
+
+        if voucher.percentage_used is None and voucher.source_evidence_excerpt:
+            m_pct = re.search(r'Đã dùng:\s*(\d+(?:\.\d+)?)\s*%', voucher.source_evidence_excerpt)
+            if m_pct:
+                try:
+                    voucher.percentage_used = float(m_pct.group(1))
+                except Exception:
+                    pass
 
         existing = self.get_by_id(voucher.id)
         changes = []

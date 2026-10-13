@@ -96,16 +96,44 @@ class CommunityVoucherSource(BaseVoucherSource):
                                         detail_link = item.get("detailLink") or "https://shopee.vn"
                                         desc = item.get("longDescription") or item.get("note") or f"Mã Shopee {code}"
 
+                                        # Bóc tách khung giờ săn (Slot-Aware Parsing) & Heuristic TTL cho mã giảm sâu
+                                        combined_text = f"{title} {desc} {item.get('note', '')} {code}"
+                                        slot_match = re.search(r'(?:khung|lúc|đợt)?\s*(0h|9h|12h|15h|18h|20h|21h|\d{1,2}:\d{2})', combined_text, re.IGNORECASE)
+                                        
+                                        is_deep_discount = (is_pct and d_val >= 30) or (not is_pct and d_val >= 30000 and min_sp == 0) or max_d >= 100000
+                                        
+                                        parsed_start_dt = None
+                                        parsed_end_dt = None
+                                        try:
+                                            parsed_start_dt = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
+                                            parsed_end_dt = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
+                                        except Exception:
+                                            pass
+
+                                        if is_deep_discount and parsed_start_dt:
+                                            if slot_match:
+                                                slot_str = slot_match.group(1).lower()
+                                                slot_hour = int(re.search(r'\d+', slot_str).group(0))
+                                                parsed_start_dt = parsed_start_dt.replace(hour=slot_hour, minute=0, second=0)
+                                                parsed_end_dt = parsed_start_dt + timedelta(minutes=30)
+                                            elif parsed_end_dt and (parsed_end_dt - parsed_start_dt).total_seconds() > 86400:
+                                                parsed_end_dt = parsed_start_dt.replace(hour=23, minute=59, second=59)
+
+                                            start_at = parsed_start_dt.isoformat()
+                                            if parsed_end_dt:
+                                                end_at = parsed_end_dt.isoformat()
+
                                         # Xác định trạng thái xác minh
                                         # Có nguồn link Shopee, thời gian start/end chính thức
                                         v_status = VerificationStatus.VERIFIED_ACTIVE
-                                        try:
-                                            # Kiểm tra xem đã hết hạn hay chưa
-                                            end_dt = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
-                                            if end_dt < datetime.now(timezone.utc):
-                                                v_status = VerificationStatus.INVALID
-                                        except Exception:
-                                            pass
+                                        if pct_used >= 90.0:
+                                            v_status = VerificationStatus.INVALID
+                                        else:
+                                            try:
+                                                if parsed_end_dt and parsed_end_dt < datetime.now(timezone.utc):
+                                                    v_status = VerificationStatus.INVALID
+                                            except Exception:
+                                                pass
 
                                         v_dict = {
                                             "id": f"REAL_{code}",

@@ -15,6 +15,7 @@ from repositories.scan_repository import ScanRepository
 from services.discovery_service import DiscoveryService
 from services.elite_discovery_service import EliteDiscoveryService
 from services.lifecycle_service import LifecycleService
+from services.shopee_live_checker import ShopeeLiveChecker
 from core.discovery_orchestrator import DiscoveryOrchestrator
 from models.scan_run import ScanMode
 from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
@@ -26,6 +27,7 @@ discovery_service = DiscoveryService(voucher_repo, scan_repo)
 elite_discovery = EliteDiscoveryService(voucher_repo, scan_repo, shop_repo)
 orchestrator = DiscoveryOrchestrator(voucher_repo, shop_repo, scan_repo)
 lifecycle_service = LifecycleService(voucher_repo, scan_repo)
+live_checker = ShopeeLiveChecker()
 
 async def seed_default_vouchers():
     """Đồng bộ ban đầu kho voucher Shopee qua Discovery Orchestrator"""
@@ -159,6 +161,7 @@ async def background_radar_loop(bot_instance=None, config=None):
 
     print("[Radar Scheduler] Khởi động tiến trình theo dõi mã sắp mở Shopee 24/7 (Memory Safe)...")
     last_deep_scan = 0
+    last_live_probe = 0
     last_cleanup = time.time()
 
     try:
@@ -214,6 +217,21 @@ async def background_radar_loop(bot_instance=None, config=None):
 
                 # Thu gom rác ngay lập tức sau chu kỳ quét sâu để giải phóng RAM về OS
                 gc.collect()
+
+            # 4. Chu kỳ Live Status Probe với Shopee API (mỗi 10 - 15 phút):
+            # Tự động ping Shopee API để phát hiện và gỡ bỏ mã đã hết lượt
+            if now_ts - last_live_probe >= 600:
+                last_live_probe = now_ts
+                try:
+                    active_vouchers = voucher_repo.get_active_vouchers(limit=50)
+                    probe_res = await live_checker.probe_active_vouchers(active_vouchers, voucher_repo)
+                    if probe_res.get("exhausted_count", 0) > 0:
+                        print(f"[Radar Scheduler] Live Probe phát hiện {probe_res['exhausted_count']} mã đã hết lượt!")
+                        if bot_instance and hasattr(bot_instance, "broadcast_voucher_exhausted"):
+                            for ex_v in probe_res.get("exhausted_vouchers", []):
+                                await bot_instance.broadcast_voucher_exhausted(ex_v, "VOUCHER_EXHAUSTED")
+                except Exception as probe_err:
+                    print(f"[Radar Scheduler] Lỗi Live Probe: {probe_err}")
 
         except Exception as e:
             print(f"[Radar Scheduler Error] Lỗi chu kỳ quét: {e}")
