@@ -618,7 +618,14 @@ class TelegramBotService:
     async def start_polling(self) -> None:
         """Vòng lặp lắng nghe tin nhắn và callback từ Telegram"""
         self.is_running = True
-        print(f"[Telegram Radar] Đã kết nối bot token {self.token[:8]}***. Bắt đầu polling...")
+        if not self.token or str(self.token).lower() in ("none", ""):
+            print("[Telegram Radar] Chưa cấu hình TELEGRAM_BOT_TOKEN. Bỏ qua polling Telegram để đảm bảo Web Server Render luôn hoạt động.")
+            while self.is_running:
+                await asyncio.sleep(60)
+            return
+
+        token_prefix = self.token[:8] if len(self.token) >= 8 else self.token
+        print(f"[Telegram Radar] Đã kết nối bot token {token_prefix}***. Bắt đầu polling...")
 
         client = self.get_http_client()
         while self.is_running:

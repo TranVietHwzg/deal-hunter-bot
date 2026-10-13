@@ -39,13 +39,7 @@ async def main():
     # 2. Khởi tạo Telegram Bot Service
     bot_instance = TelegramBotService(token=token, chat_id=chat_id)
 
-    # 3. Nạp kho quan sát khởi động ban đầu (Tránh double scan gây spike RAM trên Render)
-    print("\n• Đang khởi tạo kho chiến dịch và voucher Shopee...")
-    await scanner.seed_default_vouchers()
-    import gc
-    gc.collect()
-
-    # 4. Cấu hình Uvicorn Web Server cho Render (host 0.0.0.0, port lấy từ $PORT)
+    # 3. Cấu hình Uvicorn Web Server cho Render (host 0.0.0.0, port lấy từ $PORT)
     web_config = uvicorn.Config(app=app, host="0.0.0.0", port=port, log_level="warning")
     web_server = uvicorn.Server(web_config)
 
@@ -54,9 +48,20 @@ async def main():
     print("• Tính năng: Radar mã sắp mở, mã ẩn công khai, voucher shop, zero freeship.")
     print("• Tự động thích ứng tần suất theo khung giờ khuyến mãi.\n")
 
-    # 5. Chạy song song cả 3 luồng: Web Server (cho Render Port Binding), Bot Polling, Background Scheduler
+    # 4. Khởi tạo kho chiến dịch ban đầu trong background (đảm bảo Render bind port tức thì)
+    async def seed_in_background():
+        try:
+            print("• Đang khởi tạo kho chiến dịch và voucher Shopee trong background...")
+            await scanner.seed_default_vouchers()
+            import gc
+            gc.collect()
+        except Exception as seed_err:
+            print(f"Lỗi khởi tạo kho ban đầu: {seed_err}")
+
+    # 5. Chạy song song: Web Server (cho Render Port Binding), Background Seed, Bot Polling, Background Scheduler
     await asyncio.gather(
         web_server.serve(),
+        seed_in_background(),
         bot_instance.start_polling(),
         scanner.background_radar_loop(bot_instance)
     )
