@@ -18,6 +18,7 @@ from sources.payment_voucher_source import PaymentVoucherSource
 from sources.public_banner_source import PublicBannerSource
 from sources.leak_inbox_source import LeakInboxSource
 from sources.personal_eligible_voucher_source import PersonalEligibleVoucherSource
+from sources.telegram_channel_source import TelegramChannelSource
 
 class DiscoveryOrchestrator:
     """
@@ -49,6 +50,7 @@ class DiscoveryOrchestrator:
             PublicBannerSource(),
             LeakInboxSource(),
             PersonalEligibleVoucherSource(is_connected=False),
+            TelegramChannelSource(),
         ]
 
     async def run_discovery_cycle(self) -> Dict[str, Any]:

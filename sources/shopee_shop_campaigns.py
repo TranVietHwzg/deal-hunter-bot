@@ -40,8 +40,11 @@ class ShopeeShopCampaignSource(BaseVoucherSource):
         now_iso = now_dt.isoformat()
 
         urls = [
-            f"https://shopee.vn/api/v4/voucher/batch_get_shop_vouchers?shopid={shop.shop_id}",
-            f"https://shopee.vn/api/v2/voucher_wallet/get_shop_vouchers_by_shop_id?shop_id={shop.shop_id}"
+            f"https://shopee.vn/api/v4/voucher/get_shop_vouchers?shopid={shop.shop_id}",
+            f"https://shopee.vn/api/v4/shop/get_shop_detail?shopid={shop.shop_id}",
+            f"https://shopee.vn/api/v2/voucher_wallet/get_shop_vouchers?shop_id={shop.shop_id}",
+            f"https://shopee.vn/api/v4/pdp/get_vouchers?shop_id={shop.shop_id}",
+            f"https://shopee.vn/api/v4/voucher/batch_get_shop_vouchers?shopid={shop.shop_id}"
         ]
 
         for url in urls:

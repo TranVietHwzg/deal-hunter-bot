@@ -501,14 +501,27 @@ class VoucherRepository(BaseRepository):
         return None
 
     def get_elite_verified_vouchers(self, limit: int = 50) -> List[Voucher]:
-        """Lấy danh sách voucher đạt chuẩn xác minh VERIFIED_ACTIVE hoặc VERIFIED_UPCOMING"""
+        """Lấy danh sách voucher đạt chuẩn xác minh VERIFIED_ACTIVE, VERIFIED_UPCOMING hoặc COMMUNITY_LEAK"""
         with self.transaction() as cur:
             rows = cur.execute("""
             SELECT * FROM vouchers 
             WHERE is_freeship = 0 
-              AND verification_status IN ('VERIFIED_ACTIVE', 'VERIFIED_UPCOMING')
+              AND verification_status IN ('VERIFIED_ACTIVE', 'VERIFIED_UPCOMING', 'COMMUNITY_LEAK')
               AND status NOT IN ('EXHAUSTED', 'EXPIRED', 'CANCELLED')
             ORDER BY (verification_status = 'VERIFIED_ACTIVE') DESC, discount_value DESC
+            LIMIT ?
+            """, (limit,)).fetchall()
+            return [self._row_to_voucher(dict(r)) for r in rows]
+
+    def get_community_leak_vouchers(self, limit: int = 50) -> List[Voucher]:
+        """Lấy danh sách mã leak cộng đồng (COMMUNITY_LEAK) chờ test"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT * FROM vouchers 
+            WHERE is_freeship = 0 
+              AND verification_status = 'COMMUNITY_LEAK'
+              AND status NOT IN ('EXHAUSTED', 'EXPIRED', 'CANCELLED')
+            ORDER BY discount_value DESC
             LIMIT ?
             """, (limit,)).fetchall()
             return [self._row_to_voucher(dict(r)) for r in rows]
@@ -532,6 +545,7 @@ class VoucherRepository(BaseRepository):
             "VERIFIED_UPCOMING": 0,
             "UPCOMING_UNKNOWN_CODE": 0,
             "PERSONAL_ELIGIBILITY_UNKNOWN": 0,
+            "COMMUNITY_LEAK": 0,
             "UNVERIFIED": 0,
             "INVALID": 0,
             "TEST_DATA": 0,

@@ -125,9 +125,12 @@ def is_elite_voucher(
         if v_status in (VerificationStatus.PERSONAL_ELIGIBILITY_UNKNOWN, "PERSONAL_ELIGIBILITY_UNKNOWN"):
             return False, "Loại: Chưa xác minh điều kiện tài khoản cá nhân (PERSONAL_ELIGIBILITY_UNKNOWN)"
 
-        # E. Cấm UPCOMING_UNKNOWN_CODE (chưa có code thật)
-        if v_status in (VerificationStatus.UPCOMING_UNKNOWN_CODE, "UPCOMING_UNKNOWN_CODE") or not v_code:
+        # E. Cấm UPCOMING_UNKNOWN_CODE (chưa có code thật và không phải nút lưu trực tiếp)
+        claim_t = data.get("claim_type") if isinstance(data, dict) else getattr(data, "claim_type", "CODE")
+        if v_status in (VerificationStatus.UPCOMING_UNKNOWN_CODE, "UPCOMING_UNKNOWN_CODE"):
             return False, "Loại: Chưa có mã voucher code (UPCOMING_UNKNOWN_CODE)"
+        if not v_code and claim_t != "SAVE_BUTTON":
+            return False, "Loại: Chưa có mã voucher code"
 
         # F. Kiểm tra source_url
         if not src_url or not str(src_url).strip() or str(src_url).strip() in ("None", ""):
@@ -137,9 +140,9 @@ def is_elite_voucher(
         if not start_t or not str(start_t).strip() or not end_t or not str(end_t).strip():
             return False, "Loại: Thiếu start_time hoặc end_time hiệu lực rõ ràng"
 
-        # H. Chỉ cho phép VERIFIED_ACTIVE hoặc VERIFIED_UPCOMING
+        # H. Chỉ cho phép VERIFIED_ACTIVE, VERIFIED_UPCOMING hoặc COMMUNITY_LEAK (Mã leak cộng đồng có code)
         raw_vs = v_status.value if isinstance(v_status, VerificationStatus) else str(v_status)
-        if raw_vs not in ("VERIFIED_ACTIVE", "VERIFIED_UPCOMING"):
+        if raw_vs not in ("VERIFIED_ACTIVE", "VERIFIED_UPCOMING", "COMMUNITY_LEAK"):
             return False, f"Loại: Trạng thái xác minh '{raw_vs}' không đủ chuẩn Elite"
 
     dtype, dval, max_d, min_o = extract_voucher_fields(data)

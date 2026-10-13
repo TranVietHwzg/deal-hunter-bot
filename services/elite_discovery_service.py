@@ -19,6 +19,7 @@ from sources.payment_voucher_source import PaymentVoucherSource
 from sources.live_video_voucher_source import LiveVideoVoucherSource
 from sources.public_banner_source import PublicBannerSource
 from sources.leak_inbox_source import LeakInboxSource
+from sources.telegram_channel_source import TelegramChannelSource
 
 class EliteDiscoveryService:
     """Dịch vụ quét và phát hiện Elite Shopee Voucher:
@@ -44,6 +45,7 @@ class EliteDiscoveryService:
         self.live_video_source = LiveVideoVoucherSource()
         self.banner_source = PublicBannerSource()
         self.leak_source = LeakInboxSource()
+        self.telegram_source = TelegramChannelSource()
 
     async def run_elite_scan(
         self,
@@ -101,8 +103,10 @@ class EliteDiscoveryService:
             collected_items.extend(await self.payment_source.fetch_vouchers())
             collected_items.extend(await self.live_video_source.fetch_vouchers())
             collected_items.extend(await self.leak_source.fetch_vouchers())
+            collected_items.extend(await self.telegram_source.fetch_vouchers())
+            sources_scanned += 1
         except Exception as e:
-            errors.append(f"Community/Partners: {e}")
+            errors.append(f"Community/Partners/Telegram: {e}")
 
         # Lọc và chấm điểm Elite
         items_scanned = len(collected_items)

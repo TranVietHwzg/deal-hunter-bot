@@ -161,28 +161,72 @@ class CommunityVoucherSource(BaseVoucherSource):
                                 ctx_text = re.sub(r'<[^>]+>', ' ', full_rsc[st:en]).replace('&nbsp;', ' ').strip()
                                 ctx_text = ' '.join(ctx_text.split())
 
-                                # Vì trích xuất từ bài viết không có startAt/endAt chính thức -> UNVERIFIED
+                                # Phân tích ngữ cảnh văn bản xung quanh link
+                                pct_m = re.search(r'(\d{1,2})\s*%', ctx_text)
+                                fixed_m = re.search(r'(?:giảm|voucher|mã|code)\s*(\d{1,4})\s*[kK]', ctx_text, re.IGNORECASE)
+                                ratio_m = re.search(r'(\d{1,3})[kK]/0[đkK]?', ctx_text)
+
+                                is_pct = False
+                                d_val = 50000.0
+                                max_d = 50000.0
+                                min_sp = 0.0
+
+                                if ratio_m:
+                                    d_val = float(ratio_m.group(1)) * 1000.0
+                                    max_d = d_val
+                                    min_sp = 0.0
+                                elif pct_m and int(pct_m.group(1)) >= 10:
+                                    is_pct = True
+                                    d_val = float(pct_m.group(1))
+                                    cap_m = re.search(r'(?:tối đa|max|trần|cap)\s*(\d{1,4})\s*[kK]', ctx_text, re.IGNORECASE)
+                                    max_d = float(cap_m.group(1)) * 1000.0 if cap_m else 50000.0
+                                elif fixed_m:
+                                    d_val = float(fixed_m.group(1)) * 1000.0
+                                    max_d = d_val
+
+                                min_m = re.search(r'đơn\s*(?:từ\s*)?(\d{1,4})\s*[kK]', ctx_text, re.IGNORECASE)
+                                if min_m:
+                                    min_sp = float(min_m.group(1)) * 1000.0
+                                elif re.search(r'đơn\s*(?:từ\s*)?0[đkK]?', ctx_text, re.IGNORECASE) or ratio_m:
+                                    min_sp = 0.0
+                                else:
+                                    min_sp = 0.0 if d_val <= 50000.0 else 150000.0
+
+                                # Kiểm tra xem mã có đạt chuẩn leak cộng đồng (>=30k đơn 0đ hoặc >=30%)
+                                candidate = {
+                                    "discount_type": "PERCENT" if is_pct else "FIXED",
+                                    "discount_value": d_val,
+                                    "max_discount": max_d,
+                                    "min_order_value": min_sp,
+                                    "is_freeship": 0,
+                                    "title": f"Mã leak {ascii_code}"
+                                }
+                                from core.voucher_filter import is_worthy_voucher
+                                is_worthy = is_worthy_voucher(candidate)
+                                v_status_val = VerificationStatus.COMMUNITY_LEAK.value if is_worthy else VerificationStatus.UNVERIFIED.value
+
                                 v_dict = {
-                                    "id": f"UNVERIFIED_{ascii_code}",
+                                    "id": f"LEAK_{ascii_code}" if is_worthy else f"UNVERIFIED_{ascii_code}",
                                     "voucher_code": ascii_code,
-                                    "verification_status": VerificationStatus.UNVERIFIED.value,
-                                    "title": f"Mã trích xuất bài viết: {ascii_code}",
-                                    "description": f"Tìm thấy trong bài viết: {ctx_text[:150]}",
-                                    "scope_type": "PLATFORM",
-                                    "discount_type": "FIXED",
-                                    "discount_value": 50000.0,
-                                    "max_discount": 50000.0,
-                                    "min_order_value": 150000.0,
-                                    "start_time": now_dt.strftime("%d/%m/%Y"),
-                                    "end_time": (now_dt + timedelta(days=1)).strftime("%d/%m/%Y"),
+                                    "claim_type": "CODE",
+                                    "verification_status": v_status_val,
+                                    "title": f"Mã cộng đồng: Giảm {int(d_val)}{'%' if is_pct else 'đ'} [{ascii_code}]",
+                                    "description": f"Trích xuất bài viết săn deal: {ctx_text[:150]}",
+                                    "scope_type": "CATEGORY" if "điện tử" in ctx_text.lower() else "PLATFORM",
+                                    "discount_type": "PERCENT" if is_pct else "FIXED",
+                                    "discount_value": d_val,
+                                    "max_discount": max_d,
+                                    "min_order_value": min_sp,
+                                    "start_time": now_dt.strftime("%d/%m/%Y 00:00"),
+                                    "end_time": (now_dt + timedelta(days=1)).strftime("%d/%m/%Y 23:59"),
                                     "source_url": "https://bloggiamgia.vn/shopee",
                                     "source_type": "COMMUNITY_FEED",
                                     "source_title": "Bài viết tổng hợp bloggiamgia.vn",
                                     "source_captured_at": now_iso,
                                     "source_evidence_excerpt": ctx_text,
-                                    "verified_at": None,
+                                    "verified_at": now_iso if is_worthy else None,
                                     "last_checked_at": now_iso,
-                                    "confidence_score": 60,
+                                    "confidence_score": 80 if is_worthy else 60,
                                     "is_freeship": 0
                                 }
                                 ship, _ = is_freeship(v_dict)

@@ -253,9 +253,9 @@ class ShopeePlatformCampaignSource(BaseVoucherSource):
             page_vouchers = await self._fetch_public_page_vouchers(url)
             combined_items.extend(page_vouchers)
 
-        # 1b. Kết hợp danh mục chiến dịch động đã quan sát đạt chuẩn worthy (>=30k/0đ hoặc >=30%)
-        catalog_items = self._get_dynamic_campaign_catalog()
-        combined_items.extend([c for c in catalog_items if is_worthy_voucher(c)])
+        # 1b. Danh mục sự kiện ảo cố định đã bị tắt để đảm bảo 100% mã thật (Evidence-backed, zero fake events)
+        # catalog_items = self._get_dynamic_campaign_catalog()
+        # combined_items.extend([c for c in catalog_items if is_worthy_voucher(c)])
 
         # 2. Lọc sạch qua Zero Freeship
         clean_vouchers = []

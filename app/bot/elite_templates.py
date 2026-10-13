@@ -45,12 +45,18 @@ def format_verified_active_voucher(voucher: Voucher) -> Tuple[str, Optional[Dict
     shop_line = f"<b>Shop:</b> {voucher.shop_name}\n" if voucher.shop_name else ""
     confidence_label = "Cao" if voucher.confidence_score >= 85 else "Trung bình"
     last_check = voucher.last_checked_at[:16].replace("T", " ") if voucher.last_checked_at else "Vừa kiểm tra"
+    vs_val = voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else str(voucher.verification_status)
+
+    is_leak = vs_val == "COMMUNITY_LEAK"
+    header = "⚡ <b>MÃ LEAK CỘNG ĐỒNG - TEST LÚC MỞ THƯỞNG</b>" if is_leak else "🔥 <b>VOUCHER ELITE ĐÃ XÁC MINH</b>"
+    status_line = "<b>Trạng thái:</b> ⚡ Mã Leak Chờ Test\n" if is_leak else "<b>Trạng thái:</b> ✅ Đang hoạt động\n"
+    footer_note = "\n<i>💡 Nguồn leak săn deal cộng đồng, nhập test nhanh tại bước thanh toán.</i>\n" if is_leak else ""
 
     msg = (
-        "🔥 <b>VOUCHER ELITE ĐÃ XÁC MINH</b>\n\n"
+        f"{header}\n\n"
         f"{format_code_block(voucher)}\n"
-        "<b>Trạng thái:</b> ✅ Đang hoạt động\n"
-        f"<b>Xác minh:</b> <code>{voucher.verification_status.value if isinstance(voucher.verification_status, VerificationStatus) else voucher.verification_status}</code>\n"
+        f"{status_line}"
+        f"<b>Xác minh:</b> <code>{vs_val}</code>\n"
         f"<b>Nguồn:</b> {source_label}\n"
         f"<b>Phạm vi:</b> {format_scope_display(voucher)}\n"
         f"{shop_line}"
@@ -59,6 +65,7 @@ def format_verified_active_voucher(voucher: Voucher) -> Tuple[str, Optional[Dict
         f"<b>Hiệu lực:</b> {voucher.start_time} → {voucher.end_time}\n"
         f"<b>Kiểm tra lần cuối:</b> {last_check}\n"
         f"<b>Độ tin cậy:</b> {confidence_label}\n"
+        f"{footer_note}"
     )
 
     markup = None
@@ -176,6 +183,7 @@ def format_audit_summary_report(summary: Dict[str, int]) -> str:
         "────────────────────\n"
         f"• ✅ <b>Đã xác minh đang chạy (VERIFIED_ACTIVE):</b> {summary.get('VERIFIED_ACTIVE', 0)}\n"
         f"• ⏳ <b>Đã xác minh sắp mở (VERIFIED_UPCOMING):</b> {summary.get('VERIFIED_UPCOMING', 0)}\n"
+        f"• ⚡ <b>Mã leak cộng đồng (COMMUNITY_LEAK):</b> {summary.get('COMMUNITY_LEAK', 0)}\n"
         f"• 📅 <b>Sự kiện chưa lộ code (UPCOMING_UNKNOWN_CODE):</b> {summary.get('UPCOMING_UNKNOWN_CODE', 0)}\n"
         f"• 👤 <b>Cần ví cá nhân (PERSONAL_ELIGIBILITY_UNKNOWN):</b> {summary.get('PERSONAL_ELIGIBILITY_UNKNOWN', 0)}\n"
         f"• ⚠️ <b>Chờ kiểm tra (UNVERIFIED):</b> {summary.get('UNVERIFIED', 0)}\n"
