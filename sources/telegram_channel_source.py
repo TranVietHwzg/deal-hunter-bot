@@ -88,17 +88,23 @@ class TelegramChannelSource(BaseVoucherSource):
         shopee_link_m = re.search(r'href=[\'"](https://[^\'"]*shopee[^\'"]*)[\'"]', raw_html)
         source_url = shopee_link_m.group(1) if shopee_link_m else f"https://t.me/s/{channel_name}"
 
-        # 5. Thời gian hiệu lực
+        # 5. Thời gian hiệu lực chuẩn xác (Không gán 00:00 - 23:59)
         now = datetime.now(VN_TZ)
-        today_str = now.strftime("%d/%m/%Y")
-        hour_m = re.search(r'\b(\d{1,2})[hH](?:(\d{2}))?\b', clean_text)
-        start_time = f"00:00 {today_str}"
+        hour_m = re.search(r'\b(0|9|12|15|18|20|21|24)\s*[hH](?:(\d{2}))?\b', clean_text)
         if hour_m:
-            h = int(hour_m.group(1))
-            if 0 <= h <= 23:
-                mn = int(hour_m.group(2)) if hour_m.group(2) else 0
-                start_time = f"{h:02d}:{mn:02d} {today_str}"
-        end_time = f"23:59 {today_str}"
+            slot_h = int(hour_m.group(1))
+            if slot_h == 24:
+                slot_h = 0
+            slot_m = int(hour_m.group(2)) if hour_m.group(2) else 0
+            start_dt = now.replace(hour=slot_h, minute=slot_m, second=0, microsecond=0)
+            end_dt = start_dt + timedelta(minutes=30)
+        else:
+            # Nếu bài đăng không ghi rõ khung giờ (ví dụ "mã 50k sẵn ví"):
+            start_dt = now
+            end_dt = now + timedelta(minutes=45)
+
+        start_time = start_dt.strftime("%H:%M (%d/%m)")
+        end_time = end_dt.strftime("%H:%M (%d/%m)")
 
         # 6. Xác định claim_type và scope
         claim_type = "CODE" if code else "SAVE_BUTTON"
@@ -130,6 +136,7 @@ class TelegramChannelSource(BaseVoucherSource):
             "min_order_value": min_o,
             "start_time": start_time,
             "end_time": end_time,
+            "claim_url": source_url,
             "source_url": source_url,
             "source_type": "TELEGRAM_COMMUNITY",
             "source_title": f"Telegram @{channel_name}",

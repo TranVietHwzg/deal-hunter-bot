@@ -283,42 +283,57 @@ def format_coverage_report(stats: Dict[str, Any], tracked_count: int = 0) -> str
         "💡 <i>Mẹo: Thêm các shop bạn muốn săn bằng lệnh <code>/shops add &lt;link_shop&gt;</code>!</i>"
     )
 
-def format_zero_dong_voucher_card(voucher: Voucher) -> Tuple[str, Optional[Dict[str, Any]]]:
-    """Định dạng thẻ voucher Đơn 0Đ gọn gàng"""
+def format_zero_dong_voucher_card(voucher: Voucher, index: int = 1) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Định dạng thẻ voucher Đơn 0Đ gọn gàng theo chuẩn Text-First (không emoji rác)"""
     code = voucher.voucher_code
     discount_str = format_discount_display(voucher)
     time_str = f"{voucher.start_time} — {voucher.end_time}"
-    source_tag = "Mã Độc Quyền Tiếp Thị" if voucher.source_type == "AFFILIATE_NETWORK" or (code and code.startswith(("AFF", "KOL", "COL", "DDV", "PCU"))) else "Mã Giảm Toàn Sàn"
+
+    # Xác định phạm vi / ngành hàng
+    scope_str = "Toàn sàn"
+    if voucher.scope_type == ScopeType.SHOP or getattr(voucher, "shop_name", None):
+        scope_str = f"Shop {voucher.shop_name or 'Đã theo dõi'}"
+    elif voucher.scope_type == ScopeType.CATEGORY or getattr(voucher, "category_names", None):
+        cats = ", ".join(voucher.category_names) if getattr(voucher, "category_names", None) else "Ngành hàng"
+        scope_str = cats
+    elif "live" in (voucher.description or "").lower() or "live" in (voucher.title or "").lower():
+        scope_str = "Shopee Live"
+    elif "video" in (voucher.description or "").lower() or "video" in (voucher.title or "").lower():
+        scope_str = "Shopee Video"
+    elif voucher.source_type == "AFFILIATE_NETWORK" or (code and code.startswith(("AFF", "KOL", "COL", "DDV", "PCU"))):
+        scope_str = "Mã độc quyền tiếp thị"
+
+    d_val_str = f"{int(voucher.discount_value):,}đ".replace(",", ".") if (hasattr(voucher, "discount_type") and (getattr(voucher.discount_type, "value", str(voucher.discount_type)) != "PERCENT")) else f"{int(voucher.discount_value)}%"
 
     if code and str(code).strip() and str(code).upper() != "NONE":
         msg = (
-            f"💎 <b>GIẢM {discount_str.upper()} (ĐƠN 0Đ)</b> — {source_tag}\n"
-            f"🏷️ <b>Mã:</b> <code>{str(code).strip()}</code> <i>(Chạm để copy)</i>\n"
-            f"⏰ <b>Hiệu lực:</b> {time_str}\n"
-            "👉 <i>Nhập tại bước Thanh toán trên App Shopee</i>"
+            f"<b>{index}. Giảm {discount_str} (Đơn 0đ) — {scope_str}</b>\n"
+            f"• Mã: <code>{str(code).strip()}</code> (Chạm để sao chép)\n"
+            f"• Hiệu lực: {time_str}"
         )
         markup = None
     else:
         target_link = getattr(voucher, "shop_url", None) or getattr(voucher, "claim_url", None) or getattr(voucher, "source_url", None) or "https://shopee.vn"
+        hinh_thuc = "Lưu trên Banner Live" if "live" in scope_str.lower() else "Lưu mã trên App Shopee"
         msg = (
-            f"💎 <b>GIẢM {discount_str.upper()} (ĐƠN 0Đ)</b> — {source_tag}\n"
-            "📥 <b>Hình thức:</b> Bấm nút bên dưới để mở App Shopee lưu mã vào Ví voucher\n"
-            f"⏰ <b>Hiệu lực:</b> {time_str}\n"
+            f"<b>{index}. Giảm {discount_str} (Đơn 0đ) — {scope_str}</b>\n"
+            f"• Hình thức: {hinh_thuc}\n"
+            f"• Hiệu lực: {time_str}"
         )
         markup = {
             "inline_keyboard": [
-                [{"text": "🚀 Mở App Lưu Mã", "url": target_link}]
+                [{"text": f"Lưu mã #{index} ({d_val_str})", "url": target_link}]
             ]
         }
     return msg, markup
 
 def format_zero_dong_schedule(vouchers: List[Voucher]) -> str:
-    """Định dạng lịch săn khung giờ mã đơn 0đ tiếp theo"""
+    """Định dạng lịch săn khung giờ mã đơn 0đ tiếp theo (Text-First, không emoji rác)"""
     if not vouchers:
         return (
-            "⏳ <b>LỊCH MỞ MÃ ĐƠN 0Đ TIẾP THEO</b>\n"
+            "<b>LỊCH MỞ MÃ ĐƠN 0Đ TIẾP THEO</b>\n"
             "────────────────────\n"
-            "<i>Hiện tại chưa có đợt mã đơn 0đ nào sắp mở trong ngày. Bấm '🔍 Quét Ngay' để cập nhật!</i>"
+            "<i>Hiện tại chưa có đợt mã đơn 0đ nào sắp mở trong ngày. Bấm 'Quét Deal Mới' để cập nhật.</i>"
         )
 
     slots_map: Dict[str, List[Voucher]] = {}
@@ -329,43 +344,42 @@ def format_zero_dong_schedule(vouchers: List[Voucher]) -> str:
         slots_map.setdefault(slot_label, []).append(v)
 
     lines = [
-        "⏳ <b>LỊCH MỞ MÃ ĐƠN 0Đ TIẾP THEO</b>\n",
+        "<b>LỊCH MỞ MÃ ĐƠN 0Đ TIẾP THEO</b>\n",
         "────────────────────"
     ]
     for slot, v_list in slots_map.items():
-        lines.append(f"\n⏰ <b>{slot}:</b>")
+        lines.append(f"\n<b>{slot}:</b>")
         for v in v_list[:4]:
             d_str = format_discount_display(v)
             code_str = f" [<code>{v.voucher_code}</code>]" if v.voucher_code else ""
-            desc = v.description or v.title or "Mã Độc Quyền Tiếp Thị"
+            desc = v.description or v.title or "Toàn sàn"
             lines.append(f"• Giảm {d_str} đơn 0đ{code_str} ({desc[:45]})")
 
     lines.append("\n────────────────────")
-    lines.append("👉 <i>Đến giờ mở mã, bot sẽ tự động thông báo trước T-15m và T-2m!</i>")
+    lines.append("<i>Đến giờ mở mã, bot sẽ tự động thông báo trước T-15m và T-2m.</i>")
     return "\n".join(lines)
 
 def format_zero_dong_scan_result(vouchers: List[Voucher]) -> str:
-    """In ngay danh sách mã 0đ mới tìm thấy ra màn hình, không in log kỹ thuật thừa"""
+    """In danh sách mã 0đ mới tìm thấy theo phong cách Text-First"""
     if not vouchers:
         return (
-            "🔍 <b>KẾT QUẢ QUÉT SHOPEE RADAR</b>\n"
+            "<b>KẾT QUẢ QUÉT SHOPEE RADAR</b>\n"
             "────────────────────\n"
-            "<i>Hiện chưa phát hiện thêm mã 0đ mới nào trong đợt quét này. Hệ thống vẫn đang chạy radar ngầm 24/7.</i>"
+            "<i>Hiện chưa phát hiện thêm mã 0đ mới nào trong đợt quét này. Hệ thống vẫn đang chạy radar 24/7.</i>"
         )
 
     lines = [
-        f"🔍 <b>TÌM THẤY {len(vouchers)} MÃ ĐƠN 0Đ ĐỘC QUYỀN MỚI</b>\n",
+        "<b>KẾT QUẢ QUÉT SHOPEE RADAR</b>\n"
+        f"Tìm thấy {len(vouchers)} mã đơn 0đ mới:\n",
         "────────────────────"
     ]
-    for v in vouchers[:6]:
-        d_str = format_discount_display(v)
-        code_str = f"<code>{v.voucher_code}</code>" if v.voucher_code else "📥 <i>Lưu banner</i>"
-        time_str = f"{v.start_time} — {v.end_time}"
-        lines.append(f"💎 <b>Giảm {d_str} (Đơn 0đ)</b>")
-        lines.append(f"🏷️ Mã: {code_str}")
-        lines.append(f"⏰ {time_str}\n")
+    for idx, v in enumerate(vouchers[:6], start=1):
+        card_txt, _ = format_zero_dong_voucher_card(v, index=idx)
+        lines.append(card_txt)
+        lines.append("")
 
-    lines.append("👉 <i>Bấm '🔥 Mã Đơn 0Đ Đang Mở' để xem toàn bộ danh sách đang hiệu lực.</i>")
+    lines.append("────────────────────")
+    lines.append("<i>Bấm 'Mã Đơn 0Đ Đang Mở' để xem toàn bộ danh sách đang hiệu lực.</i>")
     return "\n".join(lines)
 
 

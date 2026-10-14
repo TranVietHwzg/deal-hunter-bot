@@ -52,59 +52,64 @@ class EliteCommands:
 
     def get_welcome_message(self) -> str:
         return (
-            "📡 <b>SHOPEE DEAL RADAR — MÃ ĐỘC QUYỀN ĐƠN 0Đ</b>\n"
+            "<b>SHOPEE DEAL RADAR — MÃ ĐỘC QUYỀN ĐƠN 0Đ</b>\n"
             "────────────────────\n"
             "Hệ thống Radar cào trực tiếp cổng Tiếp thị liên kết (Shopee Affiliate / KOL Partner):\n"
-            "• 💎 <b>100% ĐƠN TỐI THIỂU 0Đ</b> (Giảm từ 30k đến 1.000.000đ+)\n"
-            "• ⏰ <b>Khung giờ chuẩn xác</b> (Slot-aware 30 phút theo chiến dịch)\n"
-            "• 🚫 <b>TUYỆT ĐỐI KHÔNG FREESHIP & KHÔNG MÃ ẢO</b>\n"
+            "• <b>100% ĐƠN TỐI THIỂU 0Đ</b> (Giảm từ 30k đến 1.000.000đ+)\n"
+            "• <b>Khung giờ chuẩn xác</b> (Slot-aware 30 phút theo chiến dịch)\n"
+            "• <b>Tuyệt đối không freeship & Không mã ảo</b>\n"
             "────────────────────\n"
             "Chọn chức năng bên dưới để nhận mã:"
         )
 
     async def handle_zero_dong_active(self) -> Tuple[str, Dict[str, Any]]:
-        """Xử lý nút: 🔥 Mã Đơn 0Đ Đang Mở"""
+        """Xử lý nút: Mã Đơn 0Đ Đang Mở (Đa nút lưu mã & Text-First)"""
         vouchers = self.voucher_repo.get_active_zero_dong_vouchers(limit=20)
         if not vouchers:
             msg = (
-                "🔥 <b>MÃ ĐƠN 0Đ ĐANG MỞ</b>\n"
+                "<b>MÃ ĐƠN 0Đ ĐANG MỞ</b>\n"
                 "────────────────────\n"
                 "<i>Hiện tại chưa có mã đơn 0đ nào đang mở trong khung giờ này hoặc các mã đã hết ngân sách.\n"
-                "👉 Hãy bấm '⏳ Lịch Săn Khung Giờ' để đón đầu đợt mã tiếp theo, hoặc '🔍 Quét Ngay'!</i>"
+                "Bấm 'Lịch Săn Khung Giờ' để đón đầu đợt mã tiếp theo, hoặc 'Quét Deal Mới'.</i>"
             )
             return msg, get_elite_back_keyboard()
 
         lines = [
-            "🔥 <b>DANH SÁCH MÃ ĐƠN 0Đ ĐANG CÒN HIỆU LỰC</b>\n",
+            "<b>DANH SÁCH MÃ ĐƠN 0Đ ĐANG MỞ</b>\n",
             "────────────────────"
         ]
-        has_banner = False
-        banner_url = "https://shopee.vn"
-        for v in vouchers[:8]:
-            card_txt, card_markup = format_zero_dong_voucher_card(v)
+        keyboard_buttons = []
+        for idx, v in enumerate(vouchers[:8], start=1):
+            card_txt, _ = format_zero_dong_voucher_card(v, index=idx)
             lines.append(card_txt)
-            lines.append("────────────────────")
-            if card_markup and not has_banner:
-                has_banner = True
-                banner_url = card_markup["inline_keyboard"][0][0]["url"]
+            lines.append("")
+            # Nếu là mã lưu banner / ví (không có code nhập tay)
+            if not v.voucher_code or str(v.voucher_code).upper() == "NONE":
+                target_link = getattr(v, "claim_url", None) or getattr(v, "source_url", None) or getattr(v, "shop_url", None) or "https://shopee.vn"
+                d_val_str = f"{int(v.discount_value):,}đ".replace(",", ".") if (hasattr(v, "discount_type") and (getattr(v.discount_type, "value", str(v.discount_type)) != "PERCENT")) else f"{int(v.discount_value)}%"
+                keyboard_buttons.append([
+                    {"text": f"Lưu mã #{idx} ({d_val_str})", "url": target_link}
+                ])
 
-        reply_markup = {
-            "inline_keyboard": [
-                [{"text": "🚀 Mở App Lưu Mã", "url": banner_url}],
-                [{"text": "🔙 Menu chính", "callback_data": "action:elite_menu"}]
-            ]
-        } if has_banner else get_elite_back_keyboard()
+        lines.append("────────────────────")
+        lines.append("<i>Nhập mã ở bước Thanh toán hoặc bấm các nút bên dưới để lưu vào Ví.</i>")
 
+        # Nút quay lại cuối cùng
+        keyboard_buttons.append([
+            {"text": "Menu chính", "callback_data": "action:elite_menu"}
+        ])
+
+        reply_markup = {"inline_keyboard": keyboard_buttons}
         return "\n".join(lines), reply_markup
 
     async def handle_zero_dong_upcoming(self) -> Tuple[str, Dict[str, Any]]:
-        """Xử lý nút: ⏳ Lịch Săn Khung Giờ"""
+        """Xử lý nút: Lịch Săn Khung Giờ"""
         vouchers = self.voucher_repo.get_upcoming_zero_dong_vouchers(days=1, limit=30)
         msg = format_zero_dong_schedule(vouchers)
         return msg, get_elite_back_keyboard()
 
     async def handle_zero_dong_scan(self) -> Tuple[str, Dict[str, Any]]:
-        """Xử lý nút: 🔍 Quét Ngay"""
+        """Xử lý nút: Quét Deal Mới"""
         if self.orchestrator:
             await self.orchestrator.run_discovery_cycle()
         else:

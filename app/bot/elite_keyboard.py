@@ -41,7 +41,7 @@ def get_elite_voucher_action_keyboard(
 def get_elite_back_keyboard() -> Dict[str, Any]:
     return {
         "inline_keyboard": [
-            [{"text": "🔙 Menu chính", "callback_data": "action:elite_menu"}]
+            [{"text": "Menu chính", "callback_data": "action:elite_menu"}]
         ]
     }
 

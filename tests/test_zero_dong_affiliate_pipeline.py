@@ -171,7 +171,7 @@ def test_zero_dong_templates():
         end_time="20:30 14/10"
     )
     card_txt, card_markup = format_zero_dong_voucher_card(v_code)
-    assert "GIẢM 100.000Đ (ĐƠN 0Đ)" in card_txt
+    assert "Giảm 100.000đ (Đơn 0đ)" in card_txt
     assert "AFF100KTOANSAN" in card_txt
     assert "20:00 14/10 — 20:30 14/10" in card_txt
     assert card_markup is None  # Code nhập tay -> copy 1 chạm, không nút rườm rà
@@ -189,9 +189,9 @@ def test_zero_dong_templates():
         source_url="https://shopee.vn/m/khung-gio-vang"
     )
     banner_txt, banner_markup = format_zero_dong_voucher_card(v_banner)
-    assert "GIẢM 50.000Đ (ĐƠN 0Đ)" in banner_txt
+    assert "Giảm 50.000đ (Đơn 0đ)" in banner_txt
     assert banner_markup is not None
-    assert banner_markup["inline_keyboard"][0][0]["text"] == "🚀 Mở App Lưu Mã"
+    assert banner_markup["inline_keyboard"][0][0]["text"] == "Lưu mã #1 (50.000đ)"
     assert banner_markup["inline_keyboard"][0][0]["url"] == "https://shopee.vn/m/khung-gio-vang"
 
     # 3. format_zero_dong_schedule
@@ -201,7 +201,8 @@ def test_zero_dong_templates():
 
     # 4. format_zero_dong_scan_result
     scan_txt = format_zero_dong_scan_result([v_code])
-    assert "TÌM THẤY 1 MÃ ĐƠN 0Đ ĐỘC QUYỀN MỚI" in scan_txt
+    assert "KẾT QUẢ QUÉT SHOPEE RADAR" in scan_txt
+    assert "Tìm thấy 1 mã đơn 0đ mới" in scan_txt
     assert "AFF100KTOANSAN" in scan_txt
 
 @pytest.mark.anyio
@@ -245,8 +246,8 @@ async def test_elite_commands_zero_dong_flow(temp_db):
     # 1. Bấm nút 🔥 Mã Đơn 0Đ Đang Mở
     msg_active, kb_active = await commands.handle_zero_dong_active()
     assert "AFF200K0D" in msg_active
-    assert "GIẢM 200.000Đ (ĐƠN 0Đ)" in msg_active
-    assert "🔙 Menu chính" in str(kb_active)
+    assert "Giảm 200.000đ (Đơn 0đ)" in msg_active
+    assert "Menu chính" in str(kb_active)
 
     # 2. Bấm nút ⏳ Lịch Săn Khung Giờ
     msg_up, kb_up = await commands.handle_zero_dong_upcoming()
@@ -260,6 +261,6 @@ async def test_elite_commands_zero_dong_flow(temp_db):
     commands.orchestrator = orchestrator_mock
 
     msg_scan, kb_scan = await commands.handle_zero_dong_scan()
-    assert "TÌM THẤY" in msg_scan
+    assert "KẾT QUẢ QUÉT SHOPEE RADAR" in msg_scan
     assert "AFF200K0D" in msg_scan
     orchestrator_mock.run_discovery_cycle.assert_awaited_once()
