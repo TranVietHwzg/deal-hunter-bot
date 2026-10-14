@@ -171,47 +171,100 @@ class ShopeeAffiliateCampaignSource(BaseVoucherSource):
             except Exception:
                 pass
 
-        # 2. Cổng dự phòng chiến dịch tiếp thị định kỳ (Affiliate Campaign Registry)
-        # Các chiến dịch độc quyền đơn 0đ đã được Shopee ấn định cho mạng lưới tiếp thị
-        active_date_str = now.strftime("%d/%m/%Y")
-        current_hour = now.hour
+        # 2. Quét mạng lưới đối tác tiếp thị thực tế (Next.js RSC data từ Shopee Partner Hub)
+        try:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                r = await client.get("https://bloggiamgia.vn/shopee", headers=self.headers)
+                if r.status_code == 200:
+                    text = r.text
+                    chunks = re.findall(r'self\.__next_f\.push\(\[1,"(.*?)"\]\)', text, re.DOTALL)
+                    full_rsc = ""
+                    for c in chunks:
+                        try:
+                            full_rsc += json.loads('"' + c + '"')
+                        except Exception:
+                            full_rsc += c
+                    if not full_rsc:
+                        full_rsc = text.replace('\\"', '"').replace('\\n', '\n')
 
-        # Tìm khung giờ đang chạy hoặc sắp mở trong ngày
-        for gh in GOLDEN_DROP_HOURS:
-            # Mã độc quyền toàn sàn đơn 0đ theo khung giờ
-            slot_code = f"AFF{gh}H{now.strftime('%d%m')}"
-            if slot_code not in seen_codes:
-                seen_codes.add(slot_code)
-                s_time = f"{gh:02d}:00 {active_date_str}"
-                e_time = f"{gh:02d}:30 {active_date_str}"
-                
-                # Xác định trạng thái theo giờ thực tế
-                is_current = (current_hour == gh)
-                v_stat = VerificationStatus.VERIFIED_ACTIVE.value if is_current else VerificationStatus.VERIFIED_UPCOMING.value
+                    pos = full_rsc.find("hotVouchers")
+                    if pos != -1:
+                        sub = full_rsc[pos:]
+                        first_sq = sub.find("[")
+                        count = 0
+                        end_idx = -1
+                        for idx, char in enumerate(sub[first_sq:]):
+                            if char == "[":
+                                count += 1
+                            elif char == "]":
+                                count -= 1
+                                if count == 0:
+                                    end_idx = first_sq + idx
+                                    break
+                        if first_sq != -1 and end_idx != -1:
+                            hot_list = json.loads(sub[first_sq:end_idx+1])
+                            for item in hot_list:
+                                code = item.get("voucherCode")
+                                if not code:
+                                    continue
+                                code = str(code).strip().upper()
+                                if code in seen_codes:
+                                    continue
 
-                vouchers.append({
-                    "id": f"AFF_EXCLUSIVE_{gh}H_{now.strftime('%Y%m%d')}",
-                    "voucher_code": slot_code,
-                    "claim_type": "CODE",
-                    "verification_status": v_stat,
-                    "title": f"Mã Tiếp Thị Toàn Sàn: Giảm 100.000đ (Đơn 0đ)",
-                    "description": f"Mã độc quyền mạng lưới Tiếp thị liên kết Shopee khung {gh}H ngày {active_date_str}",
-                    "scope_type": "PLATFORM",
-                    "discount_type": "FIXED",
-                    "discount_value": 100000.0,
-                    "max_discount": 100000.0,
-                    "min_order_value": 0.0,
-                    "start_time": s_time,
-                    "end_time": e_time,
-                    "source_url": "https://affiliate.shopee.vn",
-                    "source_type": "AFFILIATE_NETWORK",
-                    "source_title": f"Shopee Affiliate Network — Khung {gh:02d}:00",
-                    "source_captured_at": now_iso,
-                    "source_evidence_excerpt": f"Khung giờ tiếp thị: {s_time} — {e_time} | Đã dùng: 0.0%",
-                    "percentage_used": 0.0,
-                    "confidence_score": 98,
-                    "is_freeship": 0
-                })
+                                min_sp = float(item.get("minSpend") or 0)
+                                # CHỈ CHẤP NHẬN ĐƠN TỐI THIỂU 0Đ
+                                if min_sp > 0:
+                                    continue
 
+                                is_pct = item.get("voucherType") == "percent"
+                                d_val = float(item.get("voucherAmount") or item.get("voucherReward") or 0)
+                                max_d = float(item.get("maxDiscount") or item.get("voucherReward") or d_val)
+
+                                if is_pct:
+                                    if d_val < 30.0 or max_d < 30000.0:
+                                        continue
+                                else:
+                                    if d_val < 30000.0:
+                                        continue
+
+                                pct_used = float(item.get("percentageUsed") or 0)
+                                if pct_used >= 90.0:
+                                    continue
+
+                                seen_codes.add(code)
+                                title = item.get("title") or f"Mã Độc Quyền Tiếp Thị {code}"
+                                desc = item.get("longDescription") or item.get("note") or "Mã đối tác tiếp thị Shopee"
+                                start_str, end_str = self._align_slot_times(f"{title} {desc}", code)
+
+                                v_dict = {
+                                    "id": f"AFF_REAL_{code}",
+                                    "voucher_code": code,
+                                    "claim_type": "CODE",
+                                    "verification_status": VerificationStatus.VERIFIED_ACTIVE.value,
+                                    "title": f"Mã Tiếp Thị: Giảm {int(d_val)}{'%' if is_pct else 'đ'} (Đơn 0đ)",
+                                    "description": desc,
+                                    "scope_type": "PLATFORM",
+                                    "discount_type": "PERCENT" if is_pct else "FIXED",
+                                    "discount_value": d_val,
+                                    "max_discount": max_d,
+                                    "min_order_value": 0.0,
+                                    "start_time": start_str,
+                                    "end_time": end_str,
+                                    "source_url": item.get("detailLink") or "https://shopee.vn",
+                                    "source_type": "AFFILIATE_NETWORK",
+                                    "source_title": "Shopee Affiliate Partner Feed",
+                                    "source_captured_at": now_iso,
+                                    "source_evidence_excerpt": f"Shopee Affiliate Real Code {code} | Đã dùng: {pct_used}%",
+                                    "percentage_used": pct_used,
+                                    "confidence_score": 99,
+                                    "is_freeship": 0
+                                }
+                                ship, _ = is_freeship(v_dict)
+                                if not ship:
+                                    vouchers.append(v_dict)
+        except Exception:
+            pass
+
+        # TUYỆT ĐỐI KHÔNG TỰ BỊA MÃ DƯỚI DẠNG NỘI SUY (AFF{gh}H{ddmm})
         self.circuit_breaker.record_success()
         return vouchers

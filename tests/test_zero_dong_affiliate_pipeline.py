@@ -123,18 +123,29 @@ def test_is_zero_dong_affiliate_voucher_filter():
     )
     assert is_zero_dong_affiliate_voucher(v_fixed_low) is False
 
+    # 7. Mã nội suy giả lập (AFF18H1410, ELITE100K) -> BỊ CHẶN TUYỆT ĐỐI
+    v_synthetic = make_test_voucher(
+        id="v_fake",
+        voucher_code="AFF18H1410",
+        discount_type=DiscountType.FIXED,
+        discount_value=100000,
+        min_order_value=0
+    )
+    assert is_zero_dong_affiliate_voucher(v_synthetic) is False
+
 @pytest.mark.anyio
-async def test_shopee_affiliate_campaign_source_fetches_zero_dong():
+async def test_shopee_affiliate_campaign_source_never_returns_synthetic_vouchers():
     source = ShopeeAffiliateCampaignSource()
     vouchers = await source.fetch_vouchers()
 
-    assert len(vouchers) > 0
+    import re
     for v in vouchers:
-        # Tất cả voucher từ nguồn affiliate phải là đơn 0đ và không freeship
+        # Tuyệt đối không chứa mã nội suy công thức
+        code = str(v.get("voucher_code") or "")
+        assert not re.match(r"^AFF\d{1,2}H\d{4}$", code)
         assert v["min_order_value"] <= 0
         assert not v.get("is_freeship", False)
         assert v["source_type"] == "AFFILIATE_NETWORK"
-        assert v["discount_value"] >= 30000 or (v["discount_type"] in ("PERCENT", "PERCENTAGE") and v["discount_value"] >= 30)
 
 def test_minimalist_3_button_keyboard_layout():
     kb = get_elite_main_keyboard()

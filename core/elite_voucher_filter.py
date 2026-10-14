@@ -223,6 +223,13 @@ def is_zero_dong_affiliate_voucher(data: Dict[str, Any] or Voucher) -> bool:
     if ship:
         return False
 
+    # 0. CHẶN TUYỆT ĐỐI MÃ BỊA/GIẢ LẬP THEO CÔNG THỨC (vd: AFF18H1410, ELITE100K)
+    code = data.voucher_code if isinstance(data, Voucher) else data.get("voucher_code")
+    if code:
+        code_str = str(code).strip().upper()
+        if re.match(r"^AFF\d{1,2}H\d{4}$", code_str) or re.match(r"^ELITE\d+", code_str):
+            return False
+
     dtype, dval, max_d, min_o = extract_voucher_fields(data)
 
     # 1. BẮT BUỘC ĐƠN TỐI THIỂU BẰNG 0Đ
