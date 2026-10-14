@@ -5,6 +5,10 @@ from models.scan_run import ScanRun, ScanMode
 from models.notification import NotificationEvent, NotificationEventType
 
 class ScanRepository(BaseRepository):
+    def __init__(self, db_path: Optional[str] = None):
+        super().__init__(db_path)
+        self.init_schema()
+
     def init_schema(self) -> None:
         with self.transaction() as cur:
             # 1. Bảng notification_events
@@ -93,6 +97,22 @@ class ScanRepository(BaseRepository):
                 (fingerprint,)
             ).fetchone()
             return row is not None
+
+    # Alias để унифицировать với NotificationDedupe (backward-compatible)
+    def is_fingerprint_sent(self, fingerprint: str) -> bool:
+        return self.is_notification_duplicate(fingerprint)
+
+    def record_sent_fingerprint(self, fingerprint: str, voucher_id: str = "", event_type: str = "") -> None:
+        from uuid import uuid4
+        from models.notification import NotificationEvent
+        self.record_notification(NotificationEvent(
+            id=f"NOTIF_{uuid4().hex[:8]}",
+            voucher_id=voucher_id or "NO_ID",
+            event_type=event_type or "GENERIC",
+            content_fingerprint=fingerprint,
+            telegram_message_id=None,
+            delivery_status="SENT"
+        ))
 
     def get_latest_scan_run(self) -> Optional[Dict[str, Any]]:
         with self.transaction() as cur:

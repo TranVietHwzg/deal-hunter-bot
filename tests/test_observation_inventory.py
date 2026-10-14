@@ -252,6 +252,11 @@ def test_discovery_orchestrator_execution():
             def __init__(self):
                 super().__init__("mock_healthy", "CAMPAIGN_PAGE")
             async def fetch_vouchers(self):
+                from datetime import datetime, timezone, timedelta
+                vn_tz = timezone(timedelta(hours=7))
+                now_vn = datetime.now(vn_tz)
+                start_str = (now_vn - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+                end_str = (now_vn + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
                 return [{
                     "platform": "SHOPEE",
                     "voucher_code": "MOCK50K",
@@ -259,8 +264,8 @@ def test_discovery_orchestrator_execution():
                     "discount_type": "FIXED",
                     "discount_value": 50000,
                     "min_order_value": 0,
-                    "start_time": "00:00 11/10/2026",
-                    "end_time": "23:59 11/10/2026",
+                    "start_time": start_str,
+                    "end_time": end_str,
                     "source_url": "https://shopee.vn/mock",
                     "verification_status": "VERIFIED_ACTIVE"
                 }]

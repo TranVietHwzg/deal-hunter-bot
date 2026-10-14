@@ -211,6 +211,10 @@ async def test_elite_commands_zero_dong_flow(temp_db):
     shop_repo = ShopRepository(db_path=temp_db)
     disc_mock = MagicMock()
 
+    from datetime import datetime, timedelta
+    from core.voucher_lifecycle import VN_TZ
+    now = datetime.now(VN_TZ)
+
     # Nạp voucher 0đ active
     v_active = make_test_voucher(
         id="v_act",
@@ -219,8 +223,8 @@ async def test_elite_commands_zero_dong_flow(temp_db):
         discount_type=DiscountType.FIXED,
         discount_value=200000,
         min_order_value=0,
-        start_time="2026-10-14 20:00:00",
-        end_time="2026-10-14 20:30:00",
+        start_time=(now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"),
+        end_time=(now + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
         status=VoucherStatus.ACTIVE,
         verification_status=VerificationStatus.VERIFIED_ACTIVE
     )
@@ -234,8 +238,8 @@ async def test_elite_commands_zero_dong_flow(temp_db):
         discount_type=DiscountType.FIXED,
         discount_value=500000,
         min_order_value=0,
-        start_time="2026-10-15 00:00:00",
-        end_time="2026-10-15 00:30:00",
+        start_time=(now + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+        end_time=(now + timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S"),
         status=VoucherStatus.UPCOMING_CODE_KNOWN,
         verification_status=VerificationStatus.VERIFIED_UPCOMING
     )

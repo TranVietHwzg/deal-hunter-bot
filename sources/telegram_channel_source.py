@@ -35,7 +35,24 @@ class TelegramChannelSource(BaseVoucherSource):
             "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7"
         }
 
-    def _parse_message(self, raw_html: str, channel_name: str) -> Optional[Dict[str, Any]]:
+    def _parse_message(self, raw_html: str, channel_name: str, post_dt: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+        # 0. Xác định thời gian đăng bài
+        now = datetime.now(VN_TZ)
+        if post_dt is None:
+            time_m = re.search(r'<time[^>]*datetime=[\'"]([^\'"]+)[\'"]', raw_html)
+            if time_m:
+                try:
+                    clean_iso = time_m.group(1).replace("Z", "+00:00")
+                    post_dt = datetime.fromisoformat(clean_iso).astimezone(VN_TZ)
+                except Exception:
+                    pass
+        if post_dt is None:
+            post_dt = now
+
+        # Bỏ qua ngay các bài viết cũ hơn 48h
+        if post_dt < now - timedelta(hours=48):
+            return None
+
         # 1. Trích xuất code nhập tay
         code_match = re.search(r'<code>([A-Za-z0-9_-]{4,25})</code>', raw_html)
         if not code_match:
@@ -88,23 +105,48 @@ class TelegramChannelSource(BaseVoucherSource):
         shopee_link_m = re.search(r'href=[\'"](https://[^\'"]*shopee[^\'"]*)[\'"]', raw_html)
         source_url = shopee_link_m.group(1) if shopee_link_m else f"https://t.me/s/{channel_name}"
 
-        # 5. Thời gian hiệu lực chuẩn xác (Không gán 00:00 - 23:59)
-        now = datetime.now(VN_TZ)
+        # 5. Thời gian hiệu lực chuẩn xác: Gắn vào ngày của bài viết (post_dt), tuyệt đối không gán now.
+        # Hỗ trợ ngày tháng nằm trong ngoặc đơn phía sau khung giờ, ví dụ: "12h (14/10)" hoặc "20:00 (29/09/2026)".
+        base_year = post_dt.year
+        base_month = post_dt.month
+        base_day = post_dt.day
+        paren_date_m = re.search(r'\(\s*(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\s*\)', clean_text)
+        has_explicit_date = bool(paren_date_m)
+        if paren_date_m:
+            cand_day = int(paren_date_m.group(1))
+            cand_month = int(paren_date_m.group(2))
+            cand_year_provided = bool(paren_date_m.group(3))
+            cand_year = int(paren_date_m.group(3)) if cand_year_provided else base_year
+            try:
+                cand_dt = datetime(cand_year, cand_month, cand_day, tzinfo=VN_TZ)
+                if (not cand_year_provided and (now - cand_dt).days > 60
+                        and cand_month <= 2 and now.month >= 10):
+                    cand_year += 1
+                    cand_dt = datetime(cand_year, cand_month, cand_day, tzinfo=VN_TZ)
+                base_year = cand_year
+                base_month = cand_month
+                base_day = cand_day
+            except ValueError:
+                pass
+
         hour_m = re.search(r'\b(0|9|12|15|18|20|21|24)\s*[hH](?:(\d{2}))?\b', clean_text)
         if hour_m:
             slot_h = int(hour_m.group(1))
             if slot_h == 24:
                 slot_h = 0
             slot_m = int(hour_m.group(2)) if hour_m.group(2) else 0
-            start_dt = now.replace(hour=slot_h, minute=slot_m, second=0, microsecond=0)
+            start_dt = datetime(base_year, base_month, base_day, slot_h, slot_m, second=0, microsecond=0, tzinfo=VN_TZ)
             end_dt = start_dt + timedelta(minutes=30)
         else:
             # Nếu bài đăng không ghi rõ khung giờ (ví dụ "mã 50k sẵn ví"):
-            start_dt = now
-            end_dt = now + timedelta(minutes=45)
+            start_dt = post_dt.replace(year=base_year, month=base_month, day=base_day) if has_explicit_date else post_dt
+            end_dt = start_dt + timedelta(minutes=45)
 
-        start_time = start_dt.strftime("%H:%M (%d/%m)")
-        end_time = end_dt.strftime("%H:%M (%d/%m)")
+        # Expiry-Guard: nếu bài viết chỉ rõ ngày tháng trong ngoặc và đã qua hạn -> bỏ qua để chống spam mã cũ
+        if has_explicit_date and end_dt < now:
+            return None
+        start_time = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+        end_time = end_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         # 6. Xác định claim_type và scope
         claim_type = "CODE" if code else "SAVE_BUTTON"
@@ -114,9 +156,9 @@ class TelegramChannelSource(BaseVoucherSource):
         elif "điện tử" in clean_text.lower() or "bách hóa" in clean_text.lower():
             scope_type = "CATEGORY"
 
-        # Unique ID
+        # Unique ID gắn với ngày đăng
         uid_key = code or (re.search(r'/([^/?]+)(?:\?|$)', source_url).group(1) if '/s/' in source_url or 'shopee' in source_url else f"{int(dval)}_{int(min_o)}")
-        v_id = f"TG_{channel_name.upper()}_{uid_key}_{int(dval)}"
+        v_id = f"TG_{channel_name.upper()}_{uid_key}_{int(dval)}_{post_dt.strftime('%Y%m%d')}"
 
         title = f"Mã {code or 'săn deal'}: Giảm {int(dval)}{'%' if is_pct else 'đ'}"
         if "toàn sàn" in clean_text.lower():
@@ -140,7 +182,7 @@ class TelegramChannelSource(BaseVoucherSource):
             "source_url": source_url,
             "source_type": "TELEGRAM_COMMUNITY",
             "source_title": f"Telegram @{channel_name}",
-            "source_captured_at": now.isoformat(),
+            "source_captured_at": post_dt.isoformat(),
             "source_evidence_excerpt": clean_text[:250],
             "confidence_score": 85 if code else 75,
             "is_freeship": 0
@@ -164,6 +206,7 @@ class TelegramChannelSource(BaseVoucherSource):
         await self.rate_limiter.acquire()
         vouchers = []
         seen_keys = set()
+        now = datetime.now(VN_TZ)
 
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
@@ -172,14 +215,25 @@ class TelegramChannelSource(BaseVoucherSource):
                     try:
                         resp = await client.get(url, headers=self.headers)
                         if resp.status_code == 200:
-                            msgs = re.findall(
-                                r'<div class="tgme_widget_message_text[^\"]*"\s+dir="auto">(.*?)</div>',
-                                resp.text,
-                                re.DOTALL
-                            )
-                            # Duyệt các tin nhắn mới nhất ở cuối trang
-                            for raw_msg in reversed(msgs[-15:]):
-                                item = self._parse_message(raw_msg, ch)
+                            blocks = re.split(r'<div class="tgme_widget_message\b', resp.text)
+                            for block in reversed(blocks[1:]):
+                                text_m = re.search(r'<div class="tgme_widget_message_text[^\"]*"\s+dir="auto">(.*?)</div>', block, re.DOTALL)
+                                if not text_m:
+                                    continue
+                                time_m = re.search(r'<time[^>]*datetime=[\'"]([^\'"]+)[\'"]', block)
+                                msg_dt = None
+                                if time_m:
+                                    try:
+                                        clean_iso = time_m.group(1).replace("Z", "+00:00")
+                                        msg_dt = datetime.fromisoformat(clean_iso).astimezone(VN_TZ)
+                                    except Exception:
+                                        pass
+
+                                # Bỏ qua bài viết cũ hơn 48h
+                                if msg_dt and msg_dt < now - timedelta(hours=48):
+                                    continue
+
+                                item = self._parse_message(block, ch, post_dt=msg_dt)
                                 if item:
                                     key = item.get("voucher_code") or item.get("source_url") or item.get("id")
                                     if key and key not in seen_keys:

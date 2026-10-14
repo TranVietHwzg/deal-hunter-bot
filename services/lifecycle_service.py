@@ -88,7 +88,19 @@ class LifecycleService:
             except Exception:
                 pass
 
+        from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+        import uuid
+        now = datetime.now(VN_TZ)
+
         for v in all_vouchers:
+            end_dt = parse_vietnam_time(v.end_time)
+            # Expiry-Guard: Nếu đã quá hạn hoặc đã hủy/hết hạn, cập nhật trạng thái silent và bỏ qua ngay
+            if (end_dt and now > end_dt) or v.status in (VoucherStatus.EXPIRED, VoucherStatus.CANCELLED):
+                if v.status != VoucherStatus.EXPIRED and v.status != VoucherStatus.CANCELLED:
+                    self.voucher_repo.update_status(v.id, VoucherStatus.EXPIRED)
+                    v.status = VoucherStatus.EXPIRED
+                continue
+
             is_tracked = False
             if v.shop_id and str(v.shop_id).lower() in tracked_shop_ids:
                 is_tracked = True
@@ -104,7 +116,7 @@ class LifecycleService:
                 # 1.1 Gửi thông báo khi mã mở (VOUCHER_OPENED)
                 if event_name == "VOUCHER_OPENED" and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
                     score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
-                    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 65)
+                    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 70)
                     if score >= min_notify:
                         fp = self.dedupe_service.calculate_fingerprint(v, "VOUCHER_OPENED")
                         if not self.dedupe_service.is_duplicate(fp):
@@ -114,11 +126,23 @@ class LifecycleService:
                                 "fingerprint": fp,
                                 "score": score
                             })
+                            # Ghi nhận dedupe ngay lập tức chống race-condition
+                            if hasattr(self.dedupe_service, "scan_repo") and self.dedupe_service.scan_repo:
+                                try:
+                                    self.dedupe_service.scan_repo.record_notification(NotificationEvent(
+                                        id=f"NOTIF_{uuid.uuid4().hex[:8]}",
+                                        voucher_id=v.id,
+                                        event_type=NotificationEventType.VOUCHER_OPENED,
+                                        content_fingerprint=fp,
+                                        telegram_message_id=None
+                                    ))
+                                except Exception:
+                                    pass
 
-                # 1.2 Gửi cảnh báo khi mã Elite bị hết lượt dùng (VOUCHER_EXHAUSTED) hoặc hết hạn (VOUCHER_EXPIRED)
-                elif event_name in ("VOUCHER_EXHAUSTED", "VOUCHER_EXPIRED") and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
+                # 1.2 Gửi cảnh báo khi mã Elite bị hết lượt dùng (VOUCHER_EXHAUSTED) trong lúc còn hạn (TUYỆT ĐỐI KHÔNG GỬI VOUCHER_EXPIRED)
+                elif event_name == "VOUCHER_EXHAUSTED" and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
                     score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
-                    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 65)
+                    min_notify = getattr(settings, "ELITE_SCORE_NOTIFY", 70)
                     if score >= min_notify:
                         fp = self.dedupe_service.calculate_fingerprint(v, event_name)
                         if not self.dedupe_service.is_duplicate(fp):
@@ -128,11 +152,22 @@ class LifecycleService:
                                 "fingerprint": fp,
                                 "score": score
                             })
+                            if hasattr(self.dedupe_service, "scan_repo") and self.dedupe_service.scan_repo:
+                                try:
+                                    self.dedupe_service.scan_repo.record_notification(NotificationEvent(
+                                        id=f"NOTIF_{uuid.uuid4().hex[:8]}",
+                                        voucher_id=v.id,
+                                        event_type=NotificationEventType.VOUCHER_EXHAUSTED,
+                                        content_fingerprint=fp,
+                                        telegram_message_id=None
+                                    ))
+                                except Exception:
+                                    pass
 
-            # 2. Kiểm tra nhắc nhở hẹn giờ (T-24h, T-15m, T-2m) kèm elite_score
+            # 2. Kiểm tra nhắc nhở hẹn giờ (T-15m, T-2m) kèm elite_score (bỏ REMINDER_24H)
             score, _, _ = calculate_elite_score(v, is_tracked_shop=is_tracked, is_personal_eligible=False)
             reminder_type = check_upcoming_reminder(v, elite_score=score)
-            if reminder_type and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
+            if reminder_type and reminder_type != "REMINDER_24H" and self._is_qualified(v, min_fixed_discount, min_percent_rate, min_percent_cap):
                 fp = self.dedupe_service.calculate_fingerprint(v, reminder_type)
                 if not self.dedupe_service.is_duplicate(fp):
                     notifications_to_send.append({
@@ -141,5 +176,17 @@ class LifecycleService:
                         "fingerprint": fp,
                         "score": score
                     })
+                    if hasattr(self.dedupe_service, "scan_repo") and self.dedupe_service.scan_repo:
+                        try:
+                            ev_enum = getattr(NotificationEventType, reminder_type, NotificationEventType.REMINDER_15M)
+                            self.dedupe_service.scan_repo.record_notification(NotificationEvent(
+                                id=f"NOTIF_{uuid.uuid4().hex[:8]}",
+                                voucher_id=v.id,
+                                event_type=ev_enum,
+                                content_fingerprint=fp,
+                                telegram_message_id=None
+                            ))
+                        except Exception:
+                            pass
 
         return notifications_to_send

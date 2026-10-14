@@ -140,6 +140,13 @@ def is_elite_voucher(
         if not start_t or not str(start_t).strip() or not end_t or not str(end_t).strip():
             return False, "Loại: Thiếu start_time hoặc end_time hiệu lực rõ ràng"
 
+        # Expiry-Guard: Chặn mã đã hết hạn sử dụng
+        from datetime import datetime
+        from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+        end_dt = parse_vietnam_time(end_t)
+        if end_dt and datetime.now(VN_TZ) > end_dt:
+            return False, "Loại: Voucher đã hết hạn sử dụng"
+
         # H. Chỉ cho phép VERIFIED_ACTIVE, VERIFIED_UPCOMING hoặc COMMUNITY_LEAK (Mã leak cộng đồng có code)
         raw_vs = v_status.value if isinstance(v_status, VerificationStatus) else str(v_status)
         if raw_vs not in ("VERIFIED_ACTIVE", "VERIFIED_UPCOMING", "COMMUNITY_LEAK"):

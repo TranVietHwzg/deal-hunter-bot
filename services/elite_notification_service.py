@@ -1,6 +1,7 @@
-from typing import Optional, Dict, Any
-from models.voucher import Voucher, ScopeType
-from core.notification_dedupe import NotificationDedupe
+from models.voucher import Voucher, ScopeType, VoucherStatus
+from services.dedupe_service import DedupeService
+from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+from datetime import datetime
 from app.bot.elite_templates import (
     format_elite_upcoming_known,
     format_elite_shop_voucher,
@@ -16,13 +17,15 @@ from config.settings import settings
 
 class EliteNotificationService:
     """Quản lý phát thông báo Elite Voucher lên Telegram:
-    - Kiểm duyệt nghiêm ngặt: điểm < 70 tuyệt đối không gửi (Mã 30k/0đ đạt 72đ được duyệt)
-    - Chống trùng 12 trường qua NotificationDedupe
+    - Kiểm duyệt nghiêm ngặt: điểm < 70 tuyệt đối không gửi (Mã 30k/0đ đạt 78đ được duyệt)
+    - Chống trùng Fingerprint qua DedupeService
+    - Chốt chặn Expiry-Guard: Tuyệt đối không gửi voucher hết hạn
     - Gửi thông báo mẫu chuẩn theo Section 10
     """
-    def __init__(self, telegram_bot_service, scan_repo=None):
+    def __init__(self, telegram_bot_service, scan_repo=None, dedupe_service=None):
         self.bot = telegram_bot_service
-        self.dedupe = NotificationDedupe(scan_repo)
+        self.scan_repo = scan_repo
+        self.dedupe = dedupe_service or DedupeService(scan_repo=scan_repo)
 
     async def notify_elite_voucher(
         self,
@@ -31,13 +34,22 @@ class EliteNotificationService:
         score: int = 90,
         reason: str = ""
     ) -> bool:
-        # Ngưỡng bắt buộc: Điểm dưới 70 không gửi Telegram (>=70 là ĐÁNG LẤY, >=80 là SIÊU XỊN)
+        # 1. Expiry-Guard: Tuyệt đối không gửi thông báo cho voucher đã hết hạn hoặc đã hủy
+        if voucher.status in (VoucherStatus.EXPIRED, VoucherStatus.CANCELLED):
+            return False
+        end_dt = parse_vietnam_time(voucher.end_time)
+        now = datetime.now(VN_TZ)
+        from datetime import timedelta
+        if end_dt and (now - end_dt) > timedelta(hours=48):
+            return False
+
+        # 2. Ngưỡng bắt buộc: Điểm dưới 70 không gửi Telegram (>=70 là ĐÁNG LẤY, >=80 là SIÊU XỊN)
         min_notify = getattr(settings, "min_alert_threshold", 70)
         if score < min_notify:
             return False
 
-        # Chống trùng 12 trường
-        fp = self.dedupe.calculate_fingerprint(voucher, event_tag=event_type)
+        # 3. Chống trùng fingerprint qua DedupeService
+        fp = self.dedupe.calculate_fingerprint(voucher, event_type)
         if self.dedupe.is_duplicate(fp):
             return False
 

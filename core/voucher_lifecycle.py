@@ -24,31 +24,41 @@ def parse_vietnam_time(time_str: str) -> Optional[datetime]:
     except Exception:
         pass
 
-    # 2. 'HH:MM DD/MM/YYYY' hoặc 'HH:MM DD/MM'
-    m_full = re.search(r'(\d{1,2}):(\d{2})(?:\s*ngày)?\s+(\d{1,2})/(\d{1,2})(?:/(\d{4}))?', time_str)
+    # 2. 'HH:MM DD/MM/YYYY', 'HH:MM DD/MM', hoặc 'HH:MM (DD/MM)'
+    m_full = re.search(r'(\d{1,2}):(\d{2})(?:\s*ngày)?\s*[\(]?\s*(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\s*[\)]?', time_str)
     if m_full:
         hour = int(m_full.group(1))
         minute = int(m_full.group(2))
         day = int(m_full.group(3))
         month = int(m_full.group(4))
         year_provided = bool(m_full.group(5))
-        year = int(m_full.group(5)) if year_provided else datetime.now(VN_TZ).year
+        now = datetime.now(VN_TZ)
+        year = int(m_full.group(5)) if year_provided else now.year
         try:
             res_dt = datetime(year, month, day, hour, minute, tzinfo=VN_TZ)
-            # Nếu năm không được cung cấp và thời gian rơi vào quá khứ quá 7 ngày,
-            # tự động cộng thêm 1 năm (chuyển giao năm mới)
-            if not year_provided and res_dt < (datetime.now(VN_TZ) - timedelta(days=7)):
+            # Nếu năm không được cung cấp và thời gian rơi vào quá khứ xa (> 60 ngày) thuộc đầu năm,
+            # tự động cộng thêm 1 năm (chuyển giao năm mới, ví dụ 01/01 quét vào cuối năm)
+            if not year_provided and (now - res_dt).days > 60 and month <= 2 and now.month >= 10:
                 res_dt = res_dt.replace(year=year + 1)
             return res_dt
         except ValueError:
             pass
 
-    # 3. 'YYYY-MM-DD HH:MM'
-    m_iso = re.search(r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})', time_str)
+    # 2b. Fallback strptime cho định dạng 'HH:MM (DD/MM)' kèm năm hiện tại
+    try:
+        now = datetime.now(VN_TZ)
+        dt_struct = datetime.strptime(f"{time_str} {now.year}", "%H:%M (%d/%m) %Y")
+        return dt_struct.replace(tzinfo=VN_TZ)
+    except Exception:
+        pass
+
+    # 3. 'YYYY-MM-DD HH:MM' hoặc 'YYYY-MM-DD HH:MM:SS'
+    m_iso = re.search(r'(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}))?', time_str)
     if m_iso:
-        y, m, d, h, mn = map(int, m_iso.groups())
+        y, m, d, h, mn = map(int, m_iso.groups()[:5])
+        sec = int(m_iso.group(6)) if m_iso.group(6) else 0
         try:
-            return datetime(y, m, d, h, mn, tzinfo=VN_TZ)
+            return datetime(y, m, d, h, mn, sec, tzinfo=VN_TZ)
         except ValueError:
             pass
 

@@ -76,7 +76,7 @@ async def run_radar_cycle(bot_instance=None) -> Dict[str, Any]:
                 await bot_instance.broadcast_active_voucher(v)
             elif itype in ("REMINDER_15M", "REMINDER_2M"):
                 await bot_instance.broadcast_reminder(v, itype)
-            elif itype in ("VOUCHER_EXHAUSTED", "VOUCHER_EXPIRED"):
+            elif itype == "VOUCHER_EXHAUSTED":
                 if hasattr(bot_instance, "broadcast_voucher_exhausted"):
                     await bot_instance.broadcast_voucher_exhausted(v, itype)
 
@@ -98,9 +98,9 @@ async def run_lifecycle_step(bot_instance=None):
                     await notifier.notify_elite_voucher(v, "ACTIVE_NOW", score=score)
                 else:
                     await bot_instance.broadcast_active_voucher(v)
-            elif itype in ("REMINDER_24H", "REMINDER_15M", "REMINDER_2M"):
+            elif itype in ("REMINDER_15M", "REMINDER_2M"):
                 await bot_instance.broadcast_reminder(v, itype)
-            elif itype in ("VOUCHER_EXHAUSTED", "VOUCHER_EXPIRED"):
+            elif itype == "VOUCHER_EXHAUSTED":
                 if hasattr(bot_instance, "broadcast_voucher_exhausted"):
                     await bot_instance.broadcast_voucher_exhausted(v, itype)
     return lifecycle_notifs

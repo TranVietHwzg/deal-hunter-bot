@@ -76,23 +76,32 @@ def validate_voucher(voucher_data: Dict[str, Any], allow_new_user: bool = False)
     if status in ["EXPIRED", "HET_HAN"]:
         return False, "Voucher đã hết thời hạn hiệu lực"
 
-    # Kiểm tra thời gian hết hạn nếu có
+    # Kiểm tra thời gian hết hạn nếu có (Fail-Closed: nếu có end_time mà không parse được hoặc đã qua -> False)
     end_time_raw = voucher_data.get("end_time")
     if end_time_raw:
-        try:
-            if isinstance(end_time_raw, (int, float)):
-                # timestamp
-                if end_time_raw < datetime.now().timestamp():
-                    return False, "Voucher đã quá hạn sử dụng (timestamp)"
-            elif isinstance(end_time_raw, str):
-                # ISO datetime string
-                clean_iso = end_time_raw.replace("Z", "+00:00")
-                dt = datetime.fromisoformat(clean_iso)
-                now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
-                if dt < now:
-                    return False, "Voucher đã quá hạn sử dụng"
-        except Exception:
-            pass
+        from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+        dt = None
+        if isinstance(end_time_raw, (int, float)):
+            try:
+                dt = datetime.fromtimestamp(end_time_raw, tz=VN_TZ)
+            except Exception:
+                return False, "end_time không parse được"
+        elif isinstance(end_time_raw, str):
+            dt = parse_vietnam_time(end_time_raw)
+            if not dt:
+                try:
+                    clean_iso = end_time_raw.replace("Z", "+00:00")
+                    dt_iso = datetime.fromisoformat(clean_iso)
+                    dt = dt_iso.astimezone(VN_TZ) if dt_iso.tzinfo else dt_iso.replace(tzinfo=VN_TZ)
+                except Exception:
+                    pass
+
+        if dt is None:
+            return False, "end_time không parse được"
+
+        now = datetime.now(VN_TZ)
+        if dt < now:
+            return False, "Voucher đã quá hạn sử dụng"
 
     # BƯỚC 5: Kiểm tra tính đầy đủ của điều kiện
     discount_val = voucher_data.get("discount_value") or voucher_data.get("discount_val") or 0

@@ -68,6 +68,9 @@ def test_03_voucher_without_times_rejected():
 
 # 4. Voucher có source chính thức và thời gian tương lai là VERIFIED_UPCOMING
 def test_04_verified_upcoming_voucher_accepted():
+    now_vn = datetime.now(VN_TZ)
+    future_start = (now_vn + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    future_end = (now_vn + timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
     v = Voucher(
         id="VERIFIED_UPCOMING_1",
         voucher_code="UPCOMING50K",
@@ -77,8 +80,8 @@ def test_04_verified_upcoming_voucher_accepted():
         discount_type=DiscountType.FIXED,
         discount_value=50000,
         min_order_value=100000,
-        start_time="00:00 15/10/2026",
-        end_time="23:59 15/10/2026",
+        start_time=future_start,
+        end_time=future_end,
         source_url="https://shopee.vn/m/khung-gio-vang",
         source_type="CAMPAIGN_PAGE",
         status=VoucherStatus.UPCOMING_CODE_KNOWN
@@ -89,6 +92,9 @@ def test_04_verified_upcoming_voucher_accepted():
 
 # 5. Voucher có nguồn chính thức và đang hiệu lực là VERIFIED_ACTIVE
 def test_05_verified_active_voucher_accepted():
+    now_vn = datetime.now(VN_TZ)
+    active_start = (now_vn - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    active_end = (now_vn + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
     v = Voucher(
         id="VERIFIED_ACTIVE_1",
         voucher_code="REALACTIVE50K",
@@ -98,8 +104,8 @@ def test_05_verified_active_voucher_accepted():
         discount_type=DiscountType.FIXED,
         discount_value=50000,
         min_order_value=0,
-        start_time="00:00 11/10/2026",
-        end_time="23:59 11/10/2026",
+        start_time=active_start,
+        end_time=active_end,
         source_url="https://shopee.vn/m/ma-giam-gia",
         source_type="COMMUNITY_FEED",
         status=VoucherStatus.ACTIVE

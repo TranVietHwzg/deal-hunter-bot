@@ -111,11 +111,15 @@ class DiscoveryOrchestrator:
                 if is_new:
                     canonical_created += 1
                     source_run.items_new += 1
-                else:
-                    canonical_updated += 1
-                    source_run.items_updated += 1
 
-                # 4. Tầng đánh giá chất lượng (Rule Engine độc lập)
+                # 4. Tầng đánh giá chất lượng (Rule Engine độc lập) & Expiry-Guard
+                from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+                end_dt = parse_vietnam_time(canonical_v.end_time)
+                now_vn = datetime.now(VN_TZ)
+                if end_dt and now_vn > end_dt:
+                    source_run.items_rejected_by_rule += 1
+                    continue
+
                 quality_res = classify_voucher_quality(canonical_v)
                 if quality_res["is_qualified"]:
                     canonical_v.quality_tags = quality_res["tags"]
@@ -144,6 +148,9 @@ class DiscoveryOrchestrator:
                                 "quality_tags": quality_res["tags"],
                                 "fingerprint": fp
                             })
+                            # Ghi nhận dedupe ngay lập tức chống race-condition
+                            if hasattr(self.dedupe_service, "record_sent"):
+                                self.dedupe_service.record_sent(fp, canonical_v.id, event_type)
 
             # Ghi nhận source_run vào DB sau khi đã tính đủ items_new, items_updated, items_rejected_by_rule
             self.voucher_repo.record_source_run(source_run)

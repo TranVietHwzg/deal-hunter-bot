@@ -45,11 +45,11 @@ class AppSettings(BaseModel):
     ELITE_MIN_FIXED_0D: float = Field(default=30000.0)    # Giảm tối thiểu 30.000đ cho đơn 0đ
     ELITE_MIN_PERCENT: float = Field(default=30.0)        # Giảm tối thiểu 30%
     ELITE_MIN_CAP: float = Field(default=30000.0)         # Trần giảm tối thiểu 30.000đ cho mã %
-    ELITE_SCORE_NOTIFY: int = Field(default=65)           # Ngưỡng thông báo: >= 65 điểm (ĐÁNG LẤY)
+    ELITE_SCORE_NOTIFY: int = Field(default=65)           # Ngưỡng nhắc nhở: >= 65 điểm
     ELITE_SCORE_SUPER: int = Field(default=80)            # Ngưỡng thông báo: >= 80 điểm (SIÊU XỊN)
 
     hot_voucher_threshold: int = Field(default=80)        # >= 80 điểm là SIÊU XỊN
-    min_alert_threshold: int = Field(default=65)          # >= 65 điểm là ĐÁNG LẤY
+    min_alert_threshold: int = Field(default=70)          # >= 70 điểm là ĐÁNG LẤY
     min_save_amount: float = Field(default=30000.0)       # Giảm tối thiểu 30.000đ
     min_discount_percent: float = Field(default=30.0)     # Giảm tối thiểu 30%
 

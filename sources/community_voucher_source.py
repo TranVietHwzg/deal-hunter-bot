@@ -130,7 +130,7 @@ class CommunityVoucherSource(BaseVoucherSource):
                                             v_status = VerificationStatus.INVALID
                                         else:
                                             try:
-                                                if parsed_end_dt and parsed_end_dt < datetime.now(timezone.utc):
+                                                if parsed_end_dt and parsed_end_dt < datetime.now(timezone.utc) - timedelta(hours=48):
                                                     v_status = VerificationStatus.INVALID
                                             except Exception:
                                                 pass

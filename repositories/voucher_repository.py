@@ -525,7 +525,24 @@ class VoucherRepository(BaseRepository):
             ORDER BY discount_value DESC, max_discount DESC
             LIMIT ?
             """, (limit,)).fetchall()
-            return [self._row_to_voucher(dict(r)) for r in rows]
+            vouchers = [self._row_to_voucher(dict(r)) for r in rows]
+
+            # Purge expired on read
+            from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+            now = datetime.now(VN_TZ)
+            valid_vouchers = []
+            expired_ids = []
+            for v in vouchers:
+                end_dt = parse_vietnam_time(v.end_time)
+                if end_dt and now > end_dt:
+                    expired_ids.append(v.id)
+                else:
+                    valid_vouchers.append(v)
+
+            if expired_ids:
+                cur.executemany("UPDATE vouchers SET status = 'EXPIRED' WHERE id = ?", [(i,) for i in expired_ids])
+
+            return valid_vouchers
 
     def get_upcoming_zero_dong_vouchers(self, days: int = 1, limit: int = 30) -> List[Voucher]:
         """Lấy danh sách mã ĐƠN 0Đ sắp mở trong khung giờ tới"""
@@ -543,7 +560,24 @@ class VoucherRepository(BaseRepository):
             ORDER BY start_time ASC, discount_value DESC
             LIMIT ?
             """, (limit,)).fetchall()
-            return [self._row_to_voucher(dict(r)) for r in rows]
+            vouchers = [self._row_to_voucher(dict(r)) for r in rows]
+
+            # Purge expired on read
+            from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+            now = datetime.now(VN_TZ)
+            valid_vouchers = []
+            expired_ids = []
+            for v in vouchers:
+                end_dt = parse_vietnam_time(v.end_time)
+                if end_dt and now > end_dt:
+                    expired_ids.append(v.id)
+                else:
+                    valid_vouchers.append(v)
+
+            if expired_ids:
+                cur.executemany("UPDATE vouchers SET status = 'EXPIRED' WHERE id = ?", [(i,) for i in expired_ids])
+
+            return valid_vouchers
 
     def get_elite_verified_vouchers(self, limit: int = 50) -> List[Voucher]:
         """Lấy danh sách voucher đạt chuẩn xác minh VERIFIED_ACTIVE, VERIFIED_UPCOMING hoặc COMMUNITY_LEAK"""
@@ -805,16 +839,41 @@ class VoucherRepository(BaseRepository):
         """
         deleted_counts = {}
         with self.transaction() as cur:
-            # 1. Xóa voucher EXPIRED hoặc CANCELLED quá 7 ngày
-            cur.execute("""
-            DELETE FROM vouchers 
-            WHERE status IN ('EXPIRED', 'CANCELLED') 
-              AND (
-                  (updated_at IS NOT NULL AND updated_at < datetime('now', '-7 days'))
-                  OR (end_time IS NOT NULL AND end_time < datetime('now', '-7 days'))
-              );
-            """)
-            deleted_counts["expired_vouchers"] = cur.rowcount
+            # 1. Xóa voucher EXPIRED hoặc CANCELLED quá 7 ngày qua Python parsing chuẩn xác
+            from core.voucher_lifecycle import parse_vietnam_time, VN_TZ
+            from datetime import timedelta
+            now = datetime.now(VN_TZ)
+            cutoff = now - timedelta(days=7)
+
+            cur.execute("SELECT id, end_time, updated_at FROM vouchers WHERE status IN ('EXPIRED', 'CANCELLED')")
+            expired_rows = cur.fetchall()
+            ids_to_delete = []
+            for r in expired_rows:
+                v_id, end_t, upd_t = r["id"], r["end_time"], r["updated_at"]
+                dt = parse_vietnam_time(end_t)
+                is_old = False
+                if dt and dt < cutoff:
+                    is_old = True
+                elif upd_t:
+                    u_dt = parse_vietnam_time(upd_t)
+                    if u_dt and u_dt < cutoff:
+                        is_old = True
+                if is_old:
+                    ids_to_delete.append(v_id)
+
+            if ids_to_delete:
+                cur.executemany("DELETE FROM vouchers WHERE id = ?", [(i,) for i in ids_to_delete])
+                deleted_counts["expired_vouchers"] = len(ids_to_delete)
+            else:
+                cur.execute("""
+                DELETE FROM vouchers 
+                WHERE status IN ('EXPIRED', 'CANCELLED') 
+                  AND (
+                      (updated_at IS NOT NULL AND updated_at < datetime('now', '-7 days'))
+                      OR (end_time IS NOT NULL AND end_time < datetime('now', '-7 days'))
+                  );
+                """)
+                deleted_counts["expired_vouchers"] = cur.rowcount
 
             # 2. Giữ tối đa 2.000 observations mới nhất
             cur.execute("""
