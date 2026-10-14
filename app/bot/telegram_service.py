@@ -408,20 +408,20 @@ class TelegramBotService:
 
         await self.answer_callback(query_id)
 
-        # Bộ điều hướng Elite Radar
+        # Bộ điều hướng Tối giản & Elite Radar
         if data in ("action:elite_menu", "action:menu"):
             await self.send_message(self.get_welcome_message(), reply_markup=get_elite_main_keyboard())
-        elif data in ("action:elite_super", "action:top"):
-            msg, markup = await self.elite_commands.handle_super_vouchers()
+        elif data in ("action:zero_dong_active", "action:elite_super", "action:top"):
+            msg, markup = await self.elite_commands.handle_zero_dong_active()
             await self.send_message(msg, reply_markup=markup)
-        elif data in ("action:elite_upcoming", "action:upcoming"):
-            msg, markup = await self.elite_commands.handle_upcoming_vouchers()
+        elif data in ("action:zero_dong_upcoming", "action:elite_upcoming", "action:upcoming"):
+            msg, markup = await self.elite_commands.handle_zero_dong_upcoming()
+            await self.send_message(msg, reply_markup=markup)
+        elif data in ("action:zero_dong_scan", "action:elite_scan_now", "action:scan_now"):
+            msg, markup = await self.elite_commands.handle_zero_dong_scan()
             await self.send_message(msg, reply_markup=markup)
         elif data in ("action:elite_shops", "action:shops"):
             msg, markup = await self.elite_commands.handle_shop_vouchers()
-            await self.send_message(msg, reply_markup=markup)
-        elif data in ("action:elite_scan_now", "action:scan_now"):
-            msg, markup = await self.elite_commands.handle_scan_now()
             await self.send_message(msg, reply_markup=markup)
         elif data in ("action:elite_settings", "action:settings"):
             msg, markup = self.elite_commands.get_settings_view()
@@ -470,23 +470,23 @@ class TelegramBotService:
             await self.send_message(self.get_welcome_message(), reply_markup=get_elite_main_keyboard())
             return
 
-        if text in ("/scan", "/quyetngay"):
-            msg, markup = await self.elite_commands.handle_scan_now()
+        if text in ("/scan", "/quyetngay", "/quet"):
+            msg, markup = await self.elite_commands.handle_zero_dong_scan()
             await self.send_message(msg, reply_markup=markup)
             return
 
-        if text in ("/upcoming", "/sapmo"):
-            msg, markup = await self.elite_commands.handle_upcoming_vouchers()
+        if text in ("/upcoming", "/sapmo", "/lich", "/khunggio"):
+            msg, markup = await self.elite_commands.handle_zero_dong_upcoming()
+            await self.send_message(msg, reply_markup=markup)
+            return
+
+        if text in ("/active", "/ma0d", "/don0d", "/elite", "/super", "/top"):
+            msg, markup = await self.elite_commands.handle_zero_dong_active()
             await self.send_message(msg, reply_markup=markup)
             return
 
         if text in ("/shops", "/mashop"):
             msg, markup = await self.elite_commands.handle_shop_vouchers()
-            await self.send_message(msg, reply_markup=markup)
-            return
-
-        if text in ("/elite", "/super", "/top"):
-            msg, markup = await self.elite_commands.handle_super_vouchers()
             await self.send_message(msg, reply_markup=markup)
             return
 
@@ -604,16 +604,17 @@ class TelegramBotService:
             if chat_id in self.awaiting_shop_link_users:
                 self.awaiting_shop_link_users.remove(chat_id)
             res_msg, _ = self.scan_controls.parse_and_add_shop(text)
-            await self.send_message(res_msg, reply_markup=get_main_keyboard())
+            await self.send_message(res_msg, reply_markup=get_elite_main_keyboard())
             return
 
         # 3. Mặc định phản hồi hướng dẫn
         fallback = (
-            "💡 Tôi là <b>Shopee Voucher Radar</b> chuyên theo dõi mã sắp mở và mã ẩn.\n"
-            "• Gửi link shop công khai để thêm vào theo dõi.\n"
-            "• Bấm nút <b>Quét ngay</b> hoặc <b>Mã sắp mở</b> bên dưới để xem kho mã!"
+            "💡 Tôi là <b>Shopee Voucher Radar</b> chuyên săn mã độc quyền đơn 0đ.\n"
+            "• Bấm <b>🔥 Mã Đơn 0Đ Đang Mở</b> để xem các mã đang có hiệu lực.\n"
+            "• Bấm <b>⏳ Lịch Săn Khung Giờ</b> để xem các đợt mở mã tiếp theo.\n"
+            "• Bấm <b>🔍 Quét Ngay</b> để kích hoạt tìm kiếm mã độc quyền mới!"
         )
-        await self.send_message(fallback, reply_markup=get_main_keyboard())
+        await self.send_message(fallback, reply_markup=get_elite_main_keyboard())
 
     async def start_polling(self) -> None:
         """Vòng lặp lắng nghe tin nhắn và callback từ Telegram"""

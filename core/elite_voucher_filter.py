@@ -211,10 +211,41 @@ def is_elite_voucher(
     return False, f"Loại: Kiểu giảm giá không hợp lệ: {dtype}"
 
 
+def is_zero_dong_affiliate_voucher(data: Dict[str, Any] or Voucher) -> bool:
+    """
+    Bộ lọc cứng 'Chuẩn Đơn 0Đ' chuyên biệt cho mã độc quyền tiếp thị liên kết:
+    1. Tuyệt đối loại bỏ Freeship.
+    2. ĐIỀU KIỆN TIÊN QUYẾT: Đơn tối thiểu bắt buộc phải bằng 0đ (min_order_value <= 0).
+    3. Mã giảm tiền cố định: Giảm từ 30.000đ đến 1.000.000đ+ đơn 0đ.
+    4. Mã giảm phần trăm: Giảm từ 30% trở lên đơn 0đ, trần giảm >= 30.000đ.
+    """
+    ship, _ = is_freeship(data)
+    if ship:
+        return False
+
+    dtype, dval, max_d, min_o = extract_voucher_fields(data)
+
+    # 1. BẮT BUỘC ĐƠN TỐI THIỂU BẰNG 0Đ
+    if min_o > 0:
+        return False
+
+    # 2. Mã giảm tiền cố định >= 30k
+    if dtype in ("FIXED", "FIXED_AMOUNT"):
+        return dval >= 30000.0
+
+    # 3. Mã giảm phần trăm >= 30%, trần >= 30k
+    if dtype in ("PERCENT", "PERCENTAGE"):
+        cap = max_d if max_d is not None else 0
+        return dval >= 30.0 and cap >= 30000.0
+
+    return False
+
+
 def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
     """
     Phân loại nhãn chất lượng độc lập theo thiết kế kiến trúc chuẩn:
     - Loại trừ: Freeship, hết hạn, hủy, không hợp lệ
+    - ZERO_DONG_AFFILIATE: Đạt chuẩn mã độc quyền tiếp thị đơn 0đ (>=30k đơn 0đ hoặc >=30% trần >=30k đơn 0đ)
     - HIGH_RATE: Giảm >= 30% (kể cả trần nhỏ, nhằm bắt trọn deal tỷ lệ cao)
     - ELITE_VALUE: Giảm >= 30.000đ đơn 0đ HOẶC giảm >= 30% với mức tiết kiệm dự kiến >= 30.000đ
       (Bao gồm mã TO: giảm >= 100k với ratio <= 5.0, trần >= 100k với ratio <= 8.0)
@@ -229,10 +260,13 @@ def classify_voucher_quality(data: Dict[str, Any] or Voucher) -> Dict[str, Any]:
     min_cap = getattr(settings, "ELITE_MIN_CAP", 30000.0)
     min_fixed = getattr(settings, "ELITE_MIN_FIXED_0D", 30000.0)
 
+    # Ưu tiên kiểm tra nhãn đơn 0đ
+    if is_zero_dong_affiliate_voucher(data):
+        tags.append("ZERO_DONG_AFFILIATE")
+
     if dtype in ("PERCENT", "PERCENTAGE"):
         if dval >= min_pct:
             tags.append("HIGH_RATE")
-            # Đạt ELITE_VALUE nếu có trần >= 30.000đ hoặc tiết kiệm thực tế >= 30.000đ
             effective_saving = max_d if (max_d is not None) else (min_o * (dval / 100.0) if min_o > 0 else 0)
             max_ratio = 8.0 if (max_d is not None and max_d >= 100000.0) else 4.0
             if (max_d is not None and max_d >= min_cap and min_o <= max_d * max_ratio) or effective_saving >= min_cap:

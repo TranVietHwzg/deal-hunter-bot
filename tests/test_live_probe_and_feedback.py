@@ -165,15 +165,23 @@ def test_upsert_auto_extract_and_exhaust_over_90(setup_test_db):
     assert event == "VOUCHER_EXHAUSTED"
 
 def test_keyboard_feedback_buttons():
-    markup = get_elite_voucher_action_keyboard(
+    # Giao diện tối giản: bỏ toàn bộ nút feedback rườm rà (fb:like, fb:exhaust)
+    markup_code = get_elite_voucher_action_keyboard(
         source_url="https://shopee.vn/m/sale",
-        voucher_id="V_FEEDBACK_123"
+        voucher_id="V_FEEDBACK_123",
+        claim_type="CODE"
     )
-    rows = markup["inline_keyboard"]
-    assert len(rows) == 2
-    feedback_row = rows[1]
-    assert feedback_row[0]["callback_data"] == "fb:like:V_FEEDBACK_123"
-    assert feedback_row[1]["callback_data"] == "fb:exhaust:V_FEEDBACK_123"
+    assert markup_code is None
+
+    markup_banner = get_elite_voucher_action_keyboard(
+        source_url="https://shopee.vn/m/sale",
+        voucher_id="V_FEEDBACK_123",
+        claim_type="BANNER"
+    )
+    assert markup_banner is not None
+    rows = markup_banner["inline_keyboard"]
+    assert len(rows) == 1
+    assert rows[0][0]["text"] == "🚀 Mở App Lưu Mã"
 
 @pytest.mark.anyio
 async def test_callback_feedback_exhaust(setup_test_db):

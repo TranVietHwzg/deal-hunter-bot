@@ -509,6 +509,42 @@ class VoucherRepository(BaseRepository):
                 return self._row_to_voucher(dict(row))
         return None
 
+    def get_active_zero_dong_vouchers(self, limit: int = 20) -> List[Voucher]:
+        """Lấy danh sách mã ĐƠN 0Đ đang ACTIVE, giảm >= 30k cố định hoặc >= 30%, chưa hết lượt (< 90%)"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT * FROM vouchers 
+            WHERE is_freeship = 0 
+              AND (min_order_value = 0 OR min_spend = 0)
+              AND (
+                (discount_type IN ('FIXED', 'FIXED_AMOUNT') AND discount_value >= 30000) OR
+                (discount_type IN ('PERCENT', 'PERCENTAGE') AND discount_value >= 30 AND (max_discount IS NULL OR max_discount >= 30000))
+              )
+              AND status = 'ACTIVE'
+              AND (percentage_used IS NULL OR percentage_used < 90.0)
+            ORDER BY discount_value DESC, max_discount DESC
+            LIMIT ?
+            """, (limit,)).fetchall()
+            return [self._row_to_voucher(dict(r)) for r in rows]
+
+    def get_upcoming_zero_dong_vouchers(self, days: int = 1, limit: int = 30) -> List[Voucher]:
+        """Lấy danh sách mã ĐƠN 0Đ sắp mở trong khung giờ tới"""
+        with self.transaction() as cur:
+            rows = cur.execute("""
+            SELECT * FROM vouchers 
+            WHERE is_freeship = 0 
+              AND (min_order_value = 0 OR min_spend = 0)
+              AND (
+                (discount_type IN ('FIXED', 'FIXED_AMOUNT') AND discount_value >= 30000) OR
+                (discount_type IN ('PERCENT', 'PERCENTAGE') AND discount_value >= 30 AND (max_discount IS NULL OR max_discount >= 30000))
+              )
+              AND status IN ('UPCOMING_CODE_KNOWN', 'UPCOMING_UNKNOWN_CODE', 'UPCOMING')
+              AND (percentage_used IS NULL OR percentage_used < 90.0)
+            ORDER BY start_time ASC, discount_value DESC
+            LIMIT ?
+            """, (limit,)).fetchall()
+            return [self._row_to_voucher(dict(r)) for r in rows]
+
     def get_elite_verified_vouchers(self, limit: int = 50) -> List[Voucher]:
         """Lấy danh sách voucher đạt chuẩn xác minh VERIFIED_ACTIVE, VERIFIED_UPCOMING hoặc COMMUNITY_LEAK"""
         with self.transaction() as cur:

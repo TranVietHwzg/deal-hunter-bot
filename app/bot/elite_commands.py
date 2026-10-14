@@ -20,7 +20,10 @@ from app.bot.elite_templates import (
     format_voucher_source_card,
     format_voucher_status_card,
     format_audit_summary_report,
-    format_coverage_report
+    format_coverage_report,
+    format_zero_dong_voucher_card,
+    format_zero_dong_schedule,
+    format_zero_dong_scan_result
 )
 
 class EliteCommands:
@@ -49,16 +52,70 @@ class EliteCommands:
 
     def get_welcome_message(self) -> str:
         return (
-            "📡 <b>ELITE SHOPEE VOUCHER RADAR</b>\n"
+            "📡 <b>SHOPEE DEAL RADAR — MÃ ĐỘC QUYỀN ĐƠN 0Đ</b>\n"
             "────────────────────\n"
-            "Hệ thống săn mã Shopee giá trị thực sự cho cá nhân:\n"
-            "• 🔥 <b>Chỉ báo mã đạt chuẩn Elite (>= 70/100 điểm)</b>\n"
-            "• 🛡️ <b>100% Xác minh nguồn gốc & bằng chứng thời gian</b>\n"
-            "• 💎 <b>Giảm từ 30k đơn 0đ hoặc mã to 100k-1M tỷ lệ chuẩn</b>\n"
-            "• ⚡ <b>Giảm từ 30%, trần tối thiểu 30k</b>\n"
-            "• 🚫 <b>TUYỆT ĐỐI KHÔNG FREESHIP & KHÔNG MÃ ẢO</b>\n\n"
-            "Chọn chức năng bên dưới để bắt đầu:"
+            "Hệ thống Radar cào trực tiếp cổng Tiếp thị liên kết (Shopee Affiliate / KOL Partner):\n"
+            "• 💎 <b>100% ĐƠN TỐI THIỂU 0Đ</b> (Giảm từ 30k đến 1.000.000đ+)\n"
+            "• ⏰ <b>Khung giờ chuẩn xác</b> (Slot-aware 30 phút theo chiến dịch)\n"
+            "• 🚫 <b>TUYỆT ĐỐI KHÔNG FREESHIP & KHÔNG MÃ ẢO</b>\n"
+            "────────────────────\n"
+            "Chọn chức năng bên dưới để nhận mã:"
         )
+
+    async def handle_zero_dong_active(self) -> Tuple[str, Dict[str, Any]]:
+        """Xử lý nút: 🔥 Mã Đơn 0Đ Đang Mở"""
+        vouchers = self.voucher_repo.get_active_zero_dong_vouchers(limit=20)
+        if not vouchers:
+            msg = (
+                "🔥 <b>MÃ ĐƠN 0Đ ĐANG MỞ</b>\n"
+                "────────────────────\n"
+                "<i>Hiện tại chưa có mã đơn 0đ nào đang mở trong khung giờ này hoặc các mã đã hết ngân sách.\n"
+                "👉 Hãy bấm '⏳ Lịch Săn Khung Giờ' để đón đầu đợt mã tiếp theo, hoặc '🔍 Quét Ngay'!</i>"
+            )
+            return msg, get_elite_back_keyboard()
+
+        lines = [
+            "🔥 <b>DANH SÁCH MÃ ĐƠN 0Đ ĐANG CÒN HIỆU LỰC</b>\n",
+            "────────────────────"
+        ]
+        has_banner = False
+        banner_url = "https://shopee.vn"
+        for v in vouchers[:8]:
+            card_txt, card_markup = format_zero_dong_voucher_card(v)
+            lines.append(card_txt)
+            lines.append("────────────────────")
+            if card_markup and not has_banner:
+                has_banner = True
+                banner_url = card_markup["inline_keyboard"][0][0]["url"]
+
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": "🚀 Mở App Lưu Mã", "url": banner_url}],
+                [{"text": "🔙 Menu chính", "callback_data": "action:elite_menu"}]
+            ]
+        } if has_banner else get_elite_back_keyboard()
+
+        return "\n".join(lines), reply_markup
+
+    async def handle_zero_dong_upcoming(self) -> Tuple[str, Dict[str, Any]]:
+        """Xử lý nút: ⏳ Lịch Săn Khung Giờ"""
+        vouchers = self.voucher_repo.get_upcoming_zero_dong_vouchers(days=1, limit=30)
+        msg = format_zero_dong_schedule(vouchers)
+        return msg, get_elite_back_keyboard()
+
+    async def handle_zero_dong_scan(self) -> Tuple[str, Dict[str, Any]]:
+        """Xử lý nút: 🔍 Quét Ngay"""
+        if self.orchestrator:
+            await self.orchestrator.run_discovery_cycle()
+        else:
+            await self.discovery_service.run_elite_scan(min_elite_score=self.settings["min_elite_score"])
+
+        vouchers = self.voucher_repo.get_active_zero_dong_vouchers(limit=10)
+        if not vouchers:
+            vouchers = self.voucher_repo.get_upcoming_zero_dong_vouchers(days=1, limit=10)
+
+        msg = format_zero_dong_scan_result(vouchers)
+        return msg, get_elite_back_keyboard()
 
     async def handle_super_vouchers(self) -> Tuple[str, Dict[str, Any]]:
         """Xử lý nút: 🔥 Mã siêu xịn (Hiển thị mã đã xác minh đạt chuẩn >= 70 điểm)"""

@@ -35,10 +35,13 @@ def test_main_menu_keyboard_layout():
     kb = bot.get_main_menu_keyboard()
     assert "inline_keyboard" in kb
     rows = kb["inline_keyboard"]
-    # Kiểm tra lưới 3 hàng, tổng cộng 5 nút chuẩn Elite
-    assert len(rows) == 3
+    # Kiểm tra lưới 2 hàng, tổng cộng 3 nút cốt lõi tối giản
+    assert len(rows) == 2
     total_buttons = sum(len(r) for r in rows)
-    assert total_buttons == 5
+    assert total_buttons == 3
+    assert rows[0][0]["callback_data"] == "action:zero_dong_active"
+    assert rows[0][1]["callback_data"] == "action:zero_dong_upcoming"
+    assert rows[1][0]["callback_data"] == "action:zero_dong_scan"
     for r in rows:
         for btn in r:
             assert "text" in btn

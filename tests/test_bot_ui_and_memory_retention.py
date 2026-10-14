@@ -131,30 +131,26 @@ def test_notification_templates_no_none_rendered():
     t_revealed = format_code_revealed(v)
     assert "None" not in t_revealed
 
-def test_elite_voucher_action_keyboard_always_has_two_buttons():
-    # Trường hợp 1: Có shop_url
-    kb1 = get_elite_voucher_action_keyboard(
+def test_elite_voucher_action_keyboard_minimalist():
+    # Trường hợp 1: Mã nhập tay (claim_type="CODE") -> Không hiện nút, copy 1-chạm tại code block
+    kb_code = get_elite_voucher_action_keyboard(
         source_url="https://shopee.vn/campaign",
-        shop_url="https://shopee.vn/official-store"
+        shop_url="https://shopee.vn/official-store",
+        claim_type="CODE"
     )
-    buttons1 = kb1["inline_keyboard"][0]
-    assert len(buttons1) == 2
-    assert buttons1[0]["text"] == "🏪 Mở shop / Lưu"
-    assert buttons1[0]["url"] == "https://shopee.vn/official-store"
-    assert buttons1[1]["text"] == "🌐 Mở nguồn"
-    assert buttons1[1]["url"] == "https://shopee.vn/campaign"
+    assert kb_code is None
 
-    # Trường hợp 2: Không có shop_url -> fallback source_url
-    kb2 = get_elite_voucher_action_keyboard(
-        source_url="https://shopee.vn/sieusale",
-        shop_url=None
+    # Trường hợp 2: Mã lưu banner (claim_type="BANNER") -> Hiển thị duy nhất 1 nút [ 🚀 Mở App Lưu Mã ]
+    kb_banner = get_elite_voucher_action_keyboard(
+        source_url="https://shopee.vn/m/khung-gio-san-sale",
+        shop_url=None,
+        claim_type="BANNER"
     )
-    buttons2 = kb2["inline_keyboard"][0]
-    assert len(buttons2) == 2
-    assert buttons2[0]["text"] == "🏪 Mở shop / Lưu"
-    assert buttons2[0]["url"] == "https://shopee.vn/sieusale"
-    assert buttons2[1]["text"] == "🌐 Mở nguồn"
-    assert buttons2[1]["url"] == "https://shopee.vn/sieusale"
+    assert kb_banner is not None
+    buttons = kb_banner["inline_keyboard"][0]
+    assert len(buttons) == 1
+    assert buttons[0]["text"] == "🚀 Mở App Lưu Mã"
+    assert buttons[0]["url"] == "https://shopee.vn/m/khung-gio-san-sale"
 
 @pytest.mark.anyio
 async def test_handle_super_vouchers_includes_70_and_80_scores(temp_db):

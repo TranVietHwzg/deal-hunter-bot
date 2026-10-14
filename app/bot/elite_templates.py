@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Any, Optional, Tuple, List
 from models.voucher import Voucher, ScopeType, DiscountType, VerificationStatus, VoucherStatus
 
@@ -281,5 +282,91 @@ def format_coverage_report(stats: Dict[str, Any], tracked_count: int = 0) -> str
         "🛡️ <b>Cam kết:</b> 100% Zero Freeship & Zero Fake Codes.\n"
         "💡 <i>Mẹo: Thêm các shop bạn muốn săn bằng lệnh <code>/shops add &lt;link_shop&gt;</code>!</i>"
     )
+
+def format_zero_dong_voucher_card(voucher: Voucher) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Định dạng thẻ voucher Đơn 0Đ gọn gàng"""
+    code = voucher.voucher_code
+    discount_str = format_discount_display(voucher)
+    time_str = f"{voucher.start_time} — {voucher.end_time}"
+    source_tag = "Mã Độc Quyền Tiếp Thị" if voucher.source_type == "AFFILIATE_NETWORK" or (code and code.startswith(("AFF", "KOL", "COL", "DDV", "PCU"))) else "Mã Giảm Toàn Sàn"
+
+    if code and str(code).strip() and str(code).upper() != "NONE":
+        msg = (
+            f"💎 <b>GIẢM {discount_str.upper()} (ĐƠN 0Đ)</b> — {source_tag}\n"
+            f"🏷️ <b>Mã:</b> <code>{str(code).strip()}</code> <i>(Chạm để copy)</i>\n"
+            f"⏰ <b>Hiệu lực:</b> {time_str}\n"
+            "👉 <i>Nhập tại bước Thanh toán trên App Shopee</i>"
+        )
+        markup = None
+    else:
+        target_link = getattr(voucher, "shop_url", None) or getattr(voucher, "claim_url", None) or getattr(voucher, "source_url", None) or "https://shopee.vn"
+        msg = (
+            f"💎 <b>GIẢM {discount_str.upper()} (ĐƠN 0Đ)</b> — {source_tag}\n"
+            "📥 <b>Hình thức:</b> Bấm nút bên dưới để mở App Shopee lưu mã vào Ví voucher\n"
+            f"⏰ <b>Hiệu lực:</b> {time_str}\n"
+        )
+        markup = {
+            "inline_keyboard": [
+                [{"text": "🚀 Mở App Lưu Mã", "url": target_link}]
+            ]
+        }
+    return msg, markup
+
+def format_zero_dong_schedule(vouchers: List[Voucher]) -> str:
+    """Định dạng lịch săn khung giờ mã đơn 0đ tiếp theo"""
+    if not vouchers:
+        return (
+            "⏳ <b>LỊCH MỞ MÃ ĐƠN 0Đ TIẾP THEO</b>\n"
+            "────────────────────\n"
+            "<i>Hiện tại chưa có đợt mã đơn 0đ nào sắp mở trong ngày. Bấm '🔍 Quét Ngay' để cập nhật!</i>"
+        )
+
+    slots_map: Dict[str, List[Voucher]] = {}
+    for v in vouchers:
+        s_time = v.start_time or "Khung tiếp theo"
+        m_hour = re.search(r'(\d{1,2}:\d{2})', s_time)
+        slot_label = f"Khung {m_hour.group(1)}" if m_hour else s_time
+        slots_map.setdefault(slot_label, []).append(v)
+
+    lines = [
+        "⏳ <b>LỊCH MỞ MÃ ĐƠN 0Đ TIẾP THEO</b>\n",
+        "────────────────────"
+    ]
+    for slot, v_list in slots_map.items():
+        lines.append(f"\n⏰ <b>{slot}:</b>")
+        for v in v_list[:4]:
+            d_str = format_discount_display(v)
+            code_str = f" [<code>{v.voucher_code}</code>]" if v.voucher_code else ""
+            desc = v.description or v.title or "Mã Độc Quyền Tiếp Thị"
+            lines.append(f"• Giảm {d_str} đơn 0đ{code_str} ({desc[:45]})")
+
+    lines.append("\n────────────────────")
+    lines.append("👉 <i>Đến giờ mở mã, bot sẽ tự động thông báo trước T-15m và T-2m!</i>")
+    return "\n".join(lines)
+
+def format_zero_dong_scan_result(vouchers: List[Voucher]) -> str:
+    """In ngay danh sách mã 0đ mới tìm thấy ra màn hình, không in log kỹ thuật thừa"""
+    if not vouchers:
+        return (
+            "🔍 <b>KẾT QUẢ QUÉT SHOPEE RADAR</b>\n"
+            "────────────────────\n"
+            "<i>Hiện chưa phát hiện thêm mã 0đ mới nào trong đợt quét này. Hệ thống vẫn đang chạy radar ngầm 24/7.</i>"
+        )
+
+    lines = [
+        f"🔍 <b>TÌM THẤY {len(vouchers)} MÃ ĐƠN 0Đ ĐỘC QUYỀN MỚI</b>\n",
+        "────────────────────"
+    ]
+    for v in vouchers[:6]:
+        d_str = format_discount_display(v)
+        code_str = f"<code>{v.voucher_code}</code>" if v.voucher_code else "📥 <i>Lưu banner</i>"
+        time_str = f"{v.start_time} — {v.end_time}"
+        lines.append(f"💎 <b>Giảm {d_str} (Đơn 0đ)</b>")
+        lines.append(f"🏷️ Mã: {code_str}")
+        lines.append(f"⏰ {time_str}\n")
+
+    lines.append("👉 <i>Bấm '🔥 Mã Đơn 0Đ Đang Mở' để xem toàn bộ danh sách đang hiệu lực.</i>")
+    return "\n".join(lines)
+
 
 

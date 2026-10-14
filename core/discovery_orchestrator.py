@@ -10,6 +10,7 @@ from repositories.scan_repository import ScanRepository
 from services.dedupe_service import DedupeService
 from core.elite_voucher_filter import classify_voucher_quality, is_freeship
 from sources.base_source import BaseVoucherSource
+from sources.shopee_affiliate_campaign_source import ShopeeAffiliateCampaignSource
 from sources.shopee_platform_campaigns import ShopeePlatformCampaignSource
 from sources.shopee_shop_campaigns import ShopeeShopCampaignSource
 from sources.community_voucher_source import CommunityVoucherSource
@@ -42,6 +43,7 @@ class DiscoveryOrchestrator:
         self.dedupe_service = DedupeService(self.voucher_repo, self.scan_repo)
 
         self.sources = sources or [
+            ShopeeAffiliateCampaignSource(),
             ShopeePlatformCampaignSource(),
             ShopeeShopCampaignSource(self.shop_repo),
             CommunityVoucherSource(),
